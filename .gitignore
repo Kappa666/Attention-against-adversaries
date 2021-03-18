@@ -1,2 +1,5 @@
 *.sh
 *~
+/foolbox
+/cluster_runs
+/model_checkpoints
