@@ -76,7 +76,7 @@ scales = 'scale4' if single_scale else 'all'
 if dataset == 'test10':
 	warnings.warn('running in test mode!')
 
-save_file = 'model_checkpoints/{}.h5'.format(name)
+save_file = '/ECNN/model_checkpoints/{}.h5'.format(name)
 
 if only_evaluate:
 	if not os.path.exists(save_file):
@@ -84,6 +84,8 @@ if only_evaluate:
 else:
 	if os.path.exists(save_file):
 		raise ValueError
+
+print(save_file)
 
 distribution = tf.distribute.MirroredStrategy()
 
@@ -97,6 +99,8 @@ else:
 	raise ValueError
 
 with distribution.scope():	
+	
+	print('Building network...')
 
 	model_tag = model
 	#build network
@@ -189,24 +193,31 @@ with distribution.scope():
 		model = model_backbone.ecnn(num_classes=num_classes, augment=augment, auxiliary=auxiliary, sampling=sampling, scales=scales, pooling=pooling, dropout=dropout, scale4_freeze=scale4_freeze)
 		if only_evaluate:
 			model.load_weights(save_file, by_name=True)
-			
+
+	elif model == 'parallel_transformers':
+		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment)
+		if only_evaluate:
+			model.load_weights(save_file, by_name=False)			
+	
 	else:
 		raise ValueError
 
 	model.summary()
 
+	print('Loading dataset...')
+
 	#load dataset, set defaults
 	if dataset == 'imagenet10' or dataset == 'bbox_imagenet10':
 		epochs=400
 		base_lr=1e-3
-		batch_size=1
+		batch_size=64
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
 
 		if dataset == 'imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False, batch_size=batch_size)
+			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
 		elif dataset == 'bbox_imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True, batch_size=batch_size)
+			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
 
 		def lr_schedule(epoch, lr, base_lr):
 			#keeps learning rate to a schedule
@@ -343,6 +354,8 @@ with distribution.scope():
 	else:
 		raise ValueError
 
+	print('Training model...')
+
 	if adv_train:
 		loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
 	else:
@@ -358,7 +371,7 @@ with distribution.scope():
 		lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule_filled, verbose=1)
 		#lr_reducer = tf.keras.callbacks.ReduceLROnPlateau(factor=np.sqrt(0.1), cooldown=0, patience=5, min_lr=0.5e-6)
 		oldest_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath=save_file, save_best_only=False, save_weights_only=True, verbose=1)
-		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='model_checkpoints/{}-'.format(name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
+		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='/ECNN/model_checkpoints/{}-'.format(name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
 
 		callbacks = [lr_scheduler, oldest_model_saver]
 

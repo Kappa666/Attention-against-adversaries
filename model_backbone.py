@@ -107,7 +107,7 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 		else:
 			#img shape (320, 320, 3)
 			gaze = 80
-	
+        
 		if compat_sampling:
 			warp_image_filled = partial(glimpse.warp_image, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0], gaze=gaze)
 			x = layers.Lambda(lambda tensor: tf.map_fn(warp_image_filled, tensor, back_prop=True), name='nonuniform_sampling')(x)
@@ -127,10 +127,55 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 		model_output = layers.Dense(num_classes, activation='softmax', name='probs')(x)
 	else:
 		model_output = layers.Dense(num_classes, activation=None, name='probs')(x)
+
 	model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
 
 	return model
 
+def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, restricted_attention=False, num_transformers=5):
+	
+	if restricted_attention:
+		num_theta_params = 4
+	else:
+		num_theta_params = 6
+
+	model_input = layers.Input(shape=base_model_input_shape)
+	
+	if augment:
+		x = layers.Lambda(lambda tensor: glimpse.image_augmentation(tensor, dataset='imagenet10'), name='image_augmentation')(model_input)
+	else:
+		x = model_input
+	
+	x_transformed = [None]*num_transformers
+	
+	for i in range(num_transformers):
+		x_i = x # potential issue: x is being modified?
+		
+		attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
+		theta = attn_network(x)
+
+		# identity transformation
+		# theta = tf.constant([1., 0, 0, 0, 1., 0])
+		# dim = tf.reshape(tf.shape(x)[0], [1])
+		# theta = tf.tile(theta, dim)
+		
+		x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], out_dims=[base_model_input_shape[0], base_model_input_shape[1]], restricted_theta=restricted_attention), name=f'transformer-{i}')([x_i, theta])
+
+		resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
+		resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
+		x_transformed[i] = resnet_model(x_i)
+
+	x = layers.concatenate(x_transformed)
+
+	if not return_logits:
+		model_output = layers.Dense(num_classes, activation='softmax', kernel_initializer='he_normal')(x)
+	else:
+		model_output = layers.Dense(num_classes, kernel_initializer='he_normal')(x)
+
+	model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
+	
+	return model
+    
 def ecnn(input_shape=(320,320,3), base_model_input_shape=(40,40,3), name='ECNN', num_classes=10, augment=False, auxiliary=False, sampling=True, scales='all', pooling=None, dropout=False, gaze=None, scale4_freeze=False, return_logits=False):
 	#ImageNet cortical sampling model 
 
@@ -252,13 +297,12 @@ def ecnn(input_shape=(320,320,3), base_model_input_shape=(40,40,3), name='ECNN',
 
 	return model
 
-
 def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=None, num_classes=10, augment=False, sampling=False, coarse_fixations=True, coarse_fixations_upsample=False, coarse_fixations_gaussianblur=False, gaze=None, return_logits=False, approx_ecnn=False, compat_sampling=False, build_feedback=False, ecnn_pooling=None, ecnn_dropout=False, ecnn_single_scale=False, adv_training=False, wider_network=False):
 	#all resnet architectures for cifar10
 	
 	#check args
 	if adv_training:
-		assert(gaze is None)	
+		assert(gaze is None)    
     
 	if name is not None:
 		raise NotImplementedError
@@ -287,13 +331,13 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 
 	if ecnn_pooling is not None and ecnn_dropout:
 		raise NotImplementedError
-	
+        
 	if ecnn_dropout:
 		assert(approx_ecnn)
-	
+        
 	if not coarse_fixations and coarse_fixations_upsample:
 		raise ValueError
-	
+        
 	if not coarse_fixations and coarse_fixations_gaussianblur:
 		raise ValueError
 
@@ -329,7 +373,7 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 			num_filters_per_scale=21
 		else:
 			num_filters_per_scale=43
-		if not ecnn_single_scale:	 
+		if not ecnn_single_scale:        
 			scale1_network = ResNet_CIFAR(n=3, version=1, input_shape=base_model_input_shape, num_classes=num_classes, verbose=0, return_logits=return_logits, num_filters=num_filters_per_scale, return_latent=True, skip_last_downsample=True)
 		scale2_network = ResNet_CIFAR(n=3, version=1, input_shape=base_model_input_shape, num_classes=num_classes, verbose=0, return_logits=return_logits, num_filters=num_filters_per_scale, return_latent=True, skip_last_downsample=True)
 
@@ -339,7 +383,7 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 
 	#data augmentation
 	if augment:
-		assert(not adv_training)	
+		assert(not adv_training)        
 		x = layers.Lambda(lambda tensor: glimpse.image_augmentation(tensor, dataset='cifar10'), name='image_augmentation')(model_input)
 	else:
 		if adv_training:
@@ -355,7 +399,7 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 			fixation_size = 16
 
 		if gaze is not None:
-			if not adv_training:		
+			if not adv_training:            
 				assert(isinstance(gaze, list))
 				coarse_foveation_x = tf.constant(gaze[0], tf.int32)
 				coarse_foveation_y = tf.constant(gaze[1], tf.int32)
@@ -363,11 +407,11 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 			else:
 				gaze = gaze + (input_shape[0] // 2)
 
-			if not adv_training:		
+			if not adv_training:            
 				x = layers.Lambda(lambda tensor: glimpse.crop_square_patch(tensor, coarse_fixation_center, fixation_size), name='coarse_fixations')(x)
 			else:
 				x = layers.Lambda(lambda tensor: glimpse.crop_square_patch_wrapper(tensor, patch_size=fixation_size), name='coarse_fixations')([x, gaze])
-	    
+            
 		else:
 			x = layers.Lambda(lambda tensor: tf.image.random_crop(tensor, size=[tf.shape(tensor)[0], fixation_size, fixation_size, 3]), name='coarse_fixations')(x)
 			
@@ -379,7 +423,7 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 
 	if sampling:
 		if gaze is not None:
-			if not adv_training:		
+			if not adv_training:            
 				assert(isinstance(gaze, list))
 				gaze_x = tf.constant(gaze[0], tf.int32)
 				gaze_y = tf.constant(gaze[1], tf.int32)
@@ -393,11 +437,11 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 			warp_image_filled = partial(glimpse.warp_image, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0], gaze=gaze)
 			x = layers.Lambda(lambda tensor: tf.map_fn(warp_image_filled, tensor, back_prop=True), name='nonuniform_sampling')(x)
 		else:
-			if adv_training:	    
+			if adv_training:            
 				x = layers.Lambda(lambda tensor: glimpse.warp_imagebatch_wrapper(tensor, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0]), name='nonuniform_sampling')([x, gaze])
-			else:		 
+			else:            
 				x = layers.Lambda(lambda tensor: glimpse.warp_imagebatch(tensor, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0], gaze=gaze), name='nonuniform_sampling')(x)
-	    
+            
 	if approx_ecnn:
 		if gaze is not None:
 			if not adv_training:
@@ -413,8 +457,8 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 		scale_radii = [1, 2]
 
 		scale_center = [input_shape[0] // 2, input_shape[0] // 2]
-	
-		if not adv_training:	   
+        
+		if not adv_training:       
 			scales_x = layers.Lambda(lambda tensor: glimpse.image_scales_CIFAR(tensor, scale_center, scale_radii, scale_sizes, gaze), name='scale_sampling')(x)
 		else:
 			scales_x = layers.Lambda(lambda tensor: glimpse.image_scales_CIFAR_wrapper(tensor, scale_center=scale_center, scale_radii=scale_radii, scale_sizes=scale_sizes), name='scale_sampling')([x, gaze])
@@ -426,8 +470,8 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 		model_output = network(x)		
 	else:
 		if ecnn_single_scale:
-			x = scale2_network(scale2_x)		
-		else:		 
+			x = scale2_network(scale2_x)            
+		else:            
 			scale1_x = scale1_network(scale1_x)
 			scale2_x = scale2_network(scale2_x)
 			if ecnn_pooling is None:
@@ -440,8 +484,8 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 				raise ValueError
 
 			if ecnn_dropout:
-				x = layers.Dropout(0.5)(x)	  
-	
+				x = layers.Dropout(0.5)(x)        
+        
 		if not return_logits:
 			model_output = layers.Dense(num_classes, activation='softmax', kernel_initializer='he_normal')(x)
 		else:
@@ -462,7 +506,7 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 		assert(not dummy_scaled_attention)
 		assert(not restricted_attention)
 		assert(not retinal_attention)
-	
+        
 	if dummy_scaled_attention:
 		assert(attention)
 		assert(not dummy_attention)
@@ -474,7 +518,7 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 		assert(not dummy_attention)
 		assert(not dummy_scaled_attention)
 		assert(not retinal_attention)
-	
+        
 	if retinal_attention:
 		assert(attention)
 		assert(not dummy_attention)
@@ -504,7 +548,7 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 		if not retinal_attention:
 			x = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], out_dims=[base_model_input_shape[0], base_model_input_shape[1]], restricted_theta=restricted_attention), name='transformer')([x_input, gaze])
 		else:
-			gaze = gaze*gaze_scale	  
+			gaze = gaze*gaze_scale    
 			warp_image_filled = partial(glimpse.warp_image_mapsupported, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0])
 			x = layers.Lambda(lambda tensor: tf.map_fn(warp_image_filled, (tensor[0], tensor[1]), dtype=tf.float32, back_prop=True), name='nonuniform_sampling')([x_input, gaze])
     
