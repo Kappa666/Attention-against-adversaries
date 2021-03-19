@@ -14,12 +14,14 @@ from PIL import Image
 from tqdm import tqdm
 from functools import partial
 
+FILE_PATH = '/ECNN'
+
 def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, batch_size=256, subsample=False):
 	# imagenet datasets (100 randomly pre-selected classes or full)
 
 	if data_dir != 'imagenet100' and data_dir != 'imagenet':
 		raise ValueError
-
+        
 	if subsample:
 		if not only_test:
 			raise NotImplementedError
@@ -29,11 +31,11 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 
 	shortlist = None
 	if data_dir == 'imagenet100':
-		shortlist_loc = '/om5/user/kappa666/maya/imagenet100/shortlist.pickle'
+		shortlist_loc = '{}/imagenet100/shortlist.pickle'.format(FILE_PATH)
 		shortlist = pickle.load(open(shortlist_loc, 'rb'))
 
-	train_cache_pattern = '/om5/user/kappa666/maya/{}/train-*'.format(data_dir)
-	test_cache_pattern = '/om5/user/kappa666/maya/{}/test-*'.format(data_dir)
+	train_cache_pattern = '{}/{}/train-*'.format(FILE_PATH, data_dir)
+	test_cache_pattern = '{}/{}/test-*'.format(FILE_PATH, data_dir)
 
 	#if cache does not exist, build
 	if not (glob.glob(train_cache_pattern) or glob.glob(test_cache_pattern)):
@@ -236,7 +238,7 @@ def _write_records_helper(container_x, container_y, data_dir, name, current_shar
 	shard_filename = '{}-{}.tfrecords'.format(name, current_shard_id)
 	current_shard_id += 1
 
-	writer = tf.io.TFRecordWriter('/om5/user/kappa666/maya/{}/{}'.format(data_dir, shard_filename))
+	writer = tf.io.TFRecordWriter('{}/{}/{}'.format(FILE_PATH, data_dir, shard_filename))
 
 	for image, label in zip(container_x, container_y):
 		label_aux = np.array([label, label, label, label, label])
@@ -260,10 +262,10 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 
 
 	bbox_tag = '' if not only_bbox else '_bbox'
-	x_train_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-x_train.pickle'.format(data_dir, bbox_tag)
-	y_train_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-y_train.pickle'.format(data_dir, bbox_tag)
-	x_test_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-x_test.pickle'.format(data_dir, bbox_tag)
-	y_test_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-y_test.pickle'.format(data_dir, bbox_tag)
+	x_train_cache_file = '{}/cache_store/{}{}-x_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
+	y_train_cache_file = '{}cache_store/{}{}-y_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
+	x_test_cache_file = '{}/cache_store/{}{}-x_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
+	y_test_cache_file = '{}/cache_store/{}{}-y_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
 
 	x_train = None
 	y_train = None
@@ -311,8 +313,8 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 def _build_imagenet10(data_dir, size, only_test, only_bbox):
 	# builds and dumps imagenet10 to disk
 
-	train_data_dir = '/om5/user/kappa666/maya/{}/train'.format(data_dir)
-	test_data_dir = '/om5/user/kappa666/maya/{}/val'.format(data_dir)
+	train_data_dir = '{}/{}/train'.format(FILE_PATH, data_dir)
+	test_data_dir = '{}/{}/val'.format(FILE_PATH, data_dir)
 
 	class_id_to_name = {}
 	class_name_to_id = {}
@@ -510,10 +512,10 @@ def load_cifar10(only_test=False):
 def load_cluttered_mnist(only_test=False):
 	#cluttered mnist
 
-	x_train = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/x_train.p', 'rb'))
-	x_test = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/x_test.p', 'rb'))
-	y_train = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/y_train.p', 'rb'))
-	y_test = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/y_test.p', 'rb'))
+	x_train = pickle.load(open('{}/cluttered_mnist/x_train.p'.format(FILE_PATH), 'rb'))
+	x_test = pickle.load(open('{}/cluttered_mnist/x_test.p'.format(FILE_PATH), 'rb'))
+	y_train = pickle.load(open('{}/cluttered_mnist/y_train.p'.format(FILE_PATH), 'rb'))
+	y_test = pickle.load(open('{}/cluttered_mnist/y_test.p'.format(FILE_PATH), 'rb'))
 
 	x_test = _preprocess_x(x_test)
 	y_test = _preprocess_y(y_test, 10)
@@ -556,14 +558,14 @@ def load_nonrobust_cifar10(model, name, random_relabel=True, cache=True, stagger
 
 	random_tag = 'random_relabel' if random_relabel else 'nonrandom_relabel'
 	features_tag = 'multifeature_' if build_orthogonal_features else ''
-	x_train_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}xtrain_adv.pickle'.format(name, random_tag, features_tag)
-	y_train_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}ytrain_adv.pickle'.format(name, random_tag, features_tag)
-	x_test_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}xtest_adv.pickle'.format(name, random_tag, features_tag)
-	y_test_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}ytest_adv.pickle'.format(name, random_tag, features_tag)
+	x_train_cache = '{}/cache_store/nonrobust_features_{}_{}_{}xtrain_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	y_train_cache = '{}/cache_store/nonrobust_features_{}_{}_{}ytrain_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	x_test_cache = '{}/cache_store/nonrobust_features_{}_{}_{}xtest_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	y_test_cache = '{}/cache_store/nonrobust_features_{}_{}_{}ytest_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
 
 	if build_orthogonal_features:
-		perturbations_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_perturbations_adv.pickle'.format(name, random_tag)
-		y_train_true_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_ytrain_true_adv.pickle'.format(name, random_tag)
+		perturbations_cache = '{}/cache_store/nonrobust_features_{}_{}_perturbations_adv.pickle'.format(FILE_PATH, name, random_tag)
+		y_train_true_cache = '{}/cache_store/nonrobust_features_{}_{}_ytrain_true_adv.pickle'.format(FILE_PATH, name, random_tag)
 
 	if cache:
 		if os.path.exists(x_train_cache) and os.path.exists(y_train_cache) and os.path.exists(x_test_cache) and os.path.exists(y_test_cache):

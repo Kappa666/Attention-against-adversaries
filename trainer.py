@@ -6,6 +6,7 @@ import glimpse
 import warnings
 import argparse
 import datasets
+from datasets import FILE_PATH
 import model_backbone
 import attack_backbone
 
@@ -76,7 +77,7 @@ scales = 'scale4' if single_scale else 'all'
 if dataset == 'test10':
 	warnings.warn('running in test mode!')
 
-save_file = '/ECNN/model_checkpoints/{}.h5'.format(name)
+save_file = '{}/model_checkpoints/{}.h5'.format(FILE_PATH, name)
 
 if only_evaluate:
 	if not os.path.exists(save_file):
@@ -198,7 +199,6 @@ with distribution.scope():
 		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment)
 		if only_evaluate:
 			model.load_weights(save_file, by_name=False)			
-	
 	else:
 		raise ValueError
 
@@ -371,7 +371,7 @@ with distribution.scope():
 		lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule_filled, verbose=1)
 		#lr_reducer = tf.keras.callbacks.ReduceLROnPlateau(factor=np.sqrt(0.1), cooldown=0, patience=5, min_lr=0.5e-6)
 		oldest_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath=save_file, save_best_only=False, save_weights_only=True, verbose=1)
-		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='/ECNN/model_checkpoints/{}-'.format(name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
+		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='{}/model_checkpoints/{}-'.format(FILE_PATH, name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
 
 		callbacks = [lr_scheduler, oldest_model_saver]
 
