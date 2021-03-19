@@ -105,7 +105,7 @@ build_orthogonal_features = bool(int(args['build_orthogonal_features']))
 staggered_build = bool(int(args['staggered_build']))
 staggered_build_code = int(args['staggered_build_code'])
 
-save_file = '/om5/user/kappa666/maya/model_checkpoints/{}.h5'.format(name)
+save_file = '/ECNN/model_checkpoints/{}.h5'.format(name)
 print(save_file)
 
 if dataset == 'imagenet':
@@ -160,15 +160,15 @@ elif evaluate_mode == 'nonrobust_features':
 	features_tag = 'multifeature_' if build_orthogonal_features else ''
 	if not attack_criteria_det:
 		random_relabel = True
-		adv_save_file = '/om5/user/kappa666/maya/model_checkpoints/model_nonrobust_rand_{}{}.h5'.format(features_tag, name)
+		adv_save_file = '/ECNN/model_checkpoints/model_nonrobust_rand_{}{}.h5'.format(features_tag, name)
 	else:
 		random_relabel = False
-		adv_save_file = '/om5/user/kappa666/maya/model_checkpoints/model_nonrobust_norand_{}{}.h5'.format(features_tag, name)
+		adv_save_file = '/ECNN/model_checkpoints/model_nonrobust_norand_{}{}.h5'.format(features_tag, name)
 
 	if os.path.exists(adv_save_file):
 		raise ValueError
 
-if model == 'resnet' or model == 'resnet_cifar':
+if model == 'resnet' or model == 'resnet_cifar' or model == 'parallel_transformers':
 	if sampling or coarse_fixations or cifar_ecnn:
 		stochastic_model = True
 	else:
@@ -313,6 +313,17 @@ elif model == 'ecnn':
 	else:
 		model = attack_backbone.build_ensemble(build_model=build_model, save_file=save_file, ensemble_size=ensemble_size, input_size=(320, 320, 3), random_gaze=random_gaze, gaze_val=gaze_val, load_by_name=True)
 
+elif model == 'parallel_transformers':
+	
+	def build_model():
+		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment)
+
+	if not stochastic_model:
+                model = build_model()
+                model.load_weights(save_file, by_name=False)
+	else:
+             	raise NotImplementedError
+ 
 else:
 	raise ValueError
 
@@ -374,10 +385,10 @@ if evaluate_mode == 'robustness':
 	attack_random_init_tag = 'randinit' if attack_random_init else 'nonrandinit'
 	random_gaze_tag = 'randomgaze' if random_gaze else 'nonrandomgaze'
 	subsampled_tag = '_subsampled' if subsample_dataset else ''
-	robustness_packet_loc = '/om5/user/kappa666/maya/cluster_runs/adversary/{}_{}_{}-{}-{}-{}-{}-{}-{}-{}.packet'.format(evaluate_mode, name+subsampled_tag, attack_algo, attack_distance_metric, attack_iterations, attack_step_size, attack_criteria_targeted_tag, attack_criteria_det_tag, attack_random_init_tag, random_gaze_tag)
+	robustness_packet_loc = '/ECNN/cluster_runs/adversary/{}_{}_{}-{}-{}-{}-{}-{}-{}-{}.packet'.format(evaluate_mode, name+subsampled_tag, attack_algo, attack_distance_metric, attack_iterations, attack_step_size, attack_criteria_targeted_tag, attack_criteria_det_tag, attack_random_init_tag, random_gaze_tag)
 
-	if os.path.exists(robustness_packet_loc):
-		raise ValueError
+	# if os.path.exists(robustness_packet_loc):
+		# raise ValueError
 
 	print('scanning epsilons: {}'.format(epsilons))
 
