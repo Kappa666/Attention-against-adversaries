@@ -107,7 +107,7 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 		else:
 			#img shape (320, 320, 3)
 			gaze = 80
-        
+
 		if compat_sampling:
 			warp_image_filled = partial(glimpse.warp_image, output_size=base_model_input_shape[0], input_size=base_model_input_shape[0], gaze=gaze)
 			x = layers.Lambda(lambda tensor: tf.map_fn(warp_image_filled, tensor, back_prop=True), name='nonuniform_sampling')(x)
@@ -127,7 +127,6 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 		model_output = layers.Dense(num_classes, activation='softmax', name='probs')(x)
 	else:
 		model_output = layers.Dense(num_classes, activation=None, name='probs')(x)
-
 	model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
 
 	return model
@@ -149,17 +148,15 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 	x_transformed = [None]*num_transformers
 	
 	for i in range(num_transformers):
-		x_i = x # potential issue: x is being modified?
-		
 		attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
 		theta = attn_network(x)
 
-		# identity transformation
+		# test identity transformation
 		# theta = tf.constant([1., 0, 0, 0, 1., 0])
 		# dim = tf.reshape(tf.shape(x)[0], [1])
 		# theta = tf.tile(theta, dim)
 		
-		x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], out_dims=[base_model_input_shape[0], base_model_input_shape[1]], restricted_theta=restricted_attention), name=f'transformer-{i}')([x_i, theta])
+		x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], out_dims=[base_model_input_shape[0], base_model_input_shape[1]], restricted_theta=restricted_attention), name=f'transformer-{i}')([x, theta])
 
 		resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 		resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
