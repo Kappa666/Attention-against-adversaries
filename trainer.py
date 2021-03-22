@@ -73,7 +73,7 @@ mnist_restricted_attention = bool(int(args['mnist_restricted_attention']))
 mnist_retinal_attention = bool(int(args['mnist_retinal_attention']))
 adv_train = bool(int(args['adv_train']))
 epochs = int(args['epochs'])
-shared = bool(args['shared'])
+shared = bool(int(args['shared']))
 
 pooling = None if pooling == 'None' else pooling 
 scales = 'scale4' if single_scale else 'all'

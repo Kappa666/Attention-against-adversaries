@@ -133,7 +133,6 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 	return model
 
 def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, restricted_attention=False, num_transformers=5, shared=False):
-	
 	if restricted_attention:
 		num_theta_params = 4
 	else:
@@ -151,21 +150,38 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 		resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 		resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 	
-	for i in range(num_transformers):
-		attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
-		theta = attn_network(x)
+		for i in range(num_transformers):
+			attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
+			theta = attn_network(x)
 
-		# test with identity transformation
-		# theta = tf.constant([1., 0, 0, 0, 1., 0])
-		# dim = tf.reshape(tf.shape(x)[0], [1])
-		# theta = tf.tile(theta, dim)
+			# test with identity transformation
+			# theta = tf.constant([1., 0, 0, 0, 1., 0])
+			# dim = tf.reshape(tf.shape(x)[0], [1])
+			# theta = tf.tile(theta, dim)
+			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
+												   out_dims=[base_model_input_shape[0], 
+													     base_model_input_shape[1]], 
+												   restricted_theta=restricted_attention), 
+					    name=f'transformer-{i}')([x, theta])
+			x_transformed[i] = resnet_model(x_i)
+	else:
+		for i in range(num_transformers):
+			attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
+			theta = attn_network(x)
+
+			# test with identity transformation
+			# theta = tf.constant([1., 0, 0, 0, 1., 0])
+			# dim = tf.reshape(tf.shape(x)[0], [1])
+			# theta = tf.tile(theta, dim)
 		
-		x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], out_dims=[base_model_input_shape[0], base_model_input_shape[1]], restricted_theta=restricted_attention), name=f'transformer-{i}')([x, theta])
-		
-		if not shared:
+			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
+												   out_dims=[base_model_input_shape[0], 
+													     base_model_input_shape[1]], 
+												   restricted_theta=restricted_attention), 
+					    name=f'transformer-{i}')([x, theta])
 			resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
-		x_transformed[i] = resnet_model(x_i)
+			x_transformed[i] = resnet_model(x_i)
 
 	x = layers.concatenate(x_transformed)
 
