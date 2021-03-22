@@ -369,7 +369,7 @@ else:
 	raise ValueError
 
 #save some transformed images
-if model == 'parallel_transformers' and dataset == 'imagenet10' and save_images:
+if model_tag == 'parallel_transformers' and dataset == 'imagenet10' and save_images:
 	for img_ind in range(0, 500, 50):
 		img = x_test[img_ind]
 		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), img)
