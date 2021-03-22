@@ -263,7 +263,7 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 
 	bbox_tag = '' if not only_bbox else '_bbox'
 	x_train_cache_file = '{}/cache_store/{}{}-x_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
-	y_train_cache_file = '{}cache_store/{}{}-y_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
+	y_train_cache_file = '{}/cache_store/{}{}-y_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
 	x_test_cache_file = '{}/cache_store/{}{}-x_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
 	y_test_cache_file = '{}/cache_store/{}{}-y_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
 
