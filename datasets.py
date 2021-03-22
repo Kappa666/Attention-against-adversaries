@@ -14,7 +14,7 @@ from PIL import Image
 from tqdm import tqdm
 from functools import partial
 
-FILE_PATH = '/ECNN'
+FILE_PATH = '/om5/user/kappa666/Attention-against-adversaries'
 
 def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, batch_size=256, subsample=False):
 	# imagenet datasets (100 randomly pre-selected classes or full)

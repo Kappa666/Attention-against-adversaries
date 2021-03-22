@@ -43,6 +43,8 @@ parser.add_argument('--mnist_dummy_scaled_attention', default=0)
 parser.add_argument('--mnist_restricted_attention', default=0)
 parser.add_argument('--mnist_retinal_attention', default=0)
 parser.add_argument('--adv_train', default=0)
+parser.add_argument('--epochs', default=100)
+parser.add_argument('--shared', default=0)
 
 parser.add_argument('--only_evaluate', default=0)
 args = vars(parser.parse_args())
@@ -70,6 +72,8 @@ mnist_dummy_scaled_attention = bool(int(args['mnist_dummy_scaled_attention']))
 mnist_restricted_attention = bool(int(args['mnist_restricted_attention']))
 mnist_retinal_attention = bool(int(args['mnist_retinal_attention']))
 adv_train = bool(int(args['adv_train']))
+epochs = int(args['epochs'])
+shared = bool(args['shared'])
 
 pooling = None if pooling == 'None' else pooling 
 scales = 'scale4' if single_scale else 'all'
@@ -196,7 +200,7 @@ with distribution.scope():
 			model.load_weights(save_file, by_name=True)
 
 	elif model == 'parallel_transformers':
-		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment)
+		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, restricted_attention=mnist_restricted_attention, shared=shared)
 		if only_evaluate:
 			model.load_weights(save_file, by_name=False)			
 	else:
@@ -208,7 +212,7 @@ with distribution.scope():
 
 	#load dataset, set defaults
 	if dataset == 'imagenet10' or dataset == 'bbox_imagenet10':
-		epochs=400
+		#epochs=400
 		base_lr=1e-3
 		batch_size=64
 		checkpoint_interval=999
@@ -248,7 +252,7 @@ with distribution.scope():
 		train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 
 		if dataset == 'imagenet100':        
-			epochs = 130
+			#epochs = 130
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
 
@@ -263,7 +267,7 @@ with distribution.scope():
 
 				return lr
 		else:        
-			epochs = 90
+			#epochs = 90
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
 				if epoch > 80:
@@ -278,12 +282,12 @@ with distribution.scope():
 		checkpoint_interval=999
 
 		if not adv_train:
-			epochs=200
+			#epochs=200
 			base_lr=1e-3
 			batch_size=128
 			optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
 		else:
-			epochs=165
+			#epochs=165
 			base_lr=0.1
 			batch_size=64
 			optimizer=tf.keras.optimizers.SGD(learning_rate=base_lr, decay=1e-4, momentum=0.9)
@@ -318,7 +322,7 @@ with distribution.scope():
 
                             return lr
 	elif dataset == 'cluttered_mnist':
-		epochs=100
+		#epochs=100
 		base_lr=1e-3
 		batch_size=128
 		checkpoint_interval=999
@@ -340,7 +344,7 @@ with distribution.scope():
 
 		    return lr
 	elif dataset == 'test10':
-		epochs=3
+		#epochs=3
 		base_lr=1e-6
 		batch_size=2
 		checkpoint_interval=2
