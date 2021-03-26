@@ -65,6 +65,7 @@ parser.add_argument('--staggered_build', default=0)
 parser.add_argument('--staggered_build_code', default=0)
 
 #transformer options
+parser.add_argument('--restricted_attention', default=0)
 parser.add_argument('--num_transformers', default=5)
 parser.add_argument('--save_images', default=0)
 
@@ -110,6 +111,7 @@ build_orthogonal_features = bool(int(args['build_orthogonal_features']))
 staggered_build = bool(int(args['staggered_build']))
 staggered_build_code = int(args['staggered_build_code'])
 
+restricted_attention = bool(int(args['restricted_attention']))
 num_transformers = int(args['num_transformers'])
 save_images = bool(int(args['save_images']))
 
@@ -324,7 +326,7 @@ elif model == 'ecnn':
 elif model == 'parallel_transformers':
 	
 	def build_model():
-		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, num_transformers=num_transformers)
+		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, restricted_attention=restricted_attention, num_transformers=num_transformers)
 
 	if not stochastic_model:
                 model = build_model()
@@ -373,7 +375,7 @@ if model_tag == 'parallel_transformers' and dataset == 'imagenet10' and save_ima
 	for img_ind in range(0, 500, 50):
 		img = x_test[img_ind]
 		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), img)
-		for i in range(5):
+		for i in range(num_transformers):
 			transformer = tf.keras.Model(model.inputs, model.get_layer(f'transformer-{i}').output)
 			img_new = tf.reshape(img, [1, 320, 320, 3])
 			img_new = transformer(img_new)

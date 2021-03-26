@@ -45,6 +45,7 @@ parser.add_argument('--mnist_retinal_attention', default=0)
 parser.add_argument('--adv_train', default=0)
 parser.add_argument('--epochs', default=100)
 parser.add_argument('--shared', default=0)
+parser.add_argument('--num_transformers', default=5)
 
 parser.add_argument('--only_evaluate', default=0)
 args = vars(parser.parse_args())
@@ -74,6 +75,7 @@ mnist_retinal_attention = bool(int(args['mnist_retinal_attention']))
 adv_train = bool(int(args['adv_train']))
 epochs = int(args['epochs'])
 shared = bool(int(args['shared']))
+num_transformers = int(args['num_transformers'])
 
 pooling = None if pooling == 'None' else pooling 
 scales = 'scale4' if single_scale else 'all'
@@ -200,7 +202,7 @@ with distribution.scope():
 			model.load_weights(save_file, by_name=True)
 
 	elif model == 'parallel_transformers':
-		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, restricted_attention=mnist_restricted_attention, shared=shared)
+		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, restricted_attention=mnist_restricted_attention, shared=shared, num_transformers=num_transformers)
 		if only_evaluate:
 			model.load_weights(save_file, by_name=False)			
 	else:

@@ -183,7 +183,7 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 			x_transformed[i] = resnet_model(x_i)
 
-	x = layers.concatenate(x_transformed)
+	x = layers.concatenate(x_transformed) if num_transformers > 1 else x_transformed[0]
 
 	if not return_logits:
 		model_output = layers.Dense(num_classes, activation='softmax', kernel_initializer='he_normal')(x)
@@ -598,15 +598,15 @@ def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_
 	if num_coords != 6 and num_coords != 4 and num_coords != 2:
 		raise NotImplementedError
 
-	#attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
+	attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
 
-	attn_in = layers.Input(shape=input_shape)
+	# attn_in = layers.Input(shape=input_shape)
 
-	attn_x = layers.Flatten()(attn_in)
-	attn_x = layers.Dense(50, activation='tanh')(attn_x)
-	attn_out = layers.Dropout(0.2)(attn_x)
+	# attn_x = layers.Flatten()(attn_in)
+	# attn_x = layers.Dense(50, activation='tanh')(attn_x)
+	# attn_out = layers.Dropout(0.2)(attn_x)
 
-	attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
+	# attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
 
 	model_input = layers.Input(shape=input_shape)
 	x = attention_network(model_input)
