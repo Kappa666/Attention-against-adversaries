@@ -139,7 +139,7 @@ with distribution.scope():
 
 		if single_scale:
 			assert(cifar_ecnn)
-        
+	
 		if adv_train:
 			return_logits=True
 		else:
@@ -161,7 +161,7 @@ with distribution.scope():
 			assert(not dropout)
 		else:
 			adv_training=False
-            
+	    
 		model = model_backbone.resnet_cifar(base_model_input_shape=base_model_input_shape, augment=augment, sampling=sampling, coarse_fixations=coarse_fixations, coarse_fixations_upsample=upsample_fixations, coarse_fixations_gaussianblur=blur_fixations, approx_ecnn=cifar_ecnn, return_logits=return_logits, build_feedback=cifar_feedback, ecnn_pooling=pooling, ecnn_dropout=dropout, ecnn_single_scale=single_scale, adv_training=adv_training, wider_network=adv_train)
 		if only_evaluate:
 			#convention for resnet_cifar is to not use the name
@@ -211,7 +211,10 @@ with distribution.scope():
 	model.summary()
 
 	print('Loading dataset...')
-
+	if num_transformers == 5:
+		scale = 1.5
+	else:
+		scale = 1
 	#load dataset, set defaults
 	if dataset == 'imagenet10' or dataset == 'bbox_imagenet10':
 		#epochs=400
@@ -221,24 +224,24 @@ with distribution.scope():
 		optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
 
 		if dataset == 'imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
+			#x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
+                        train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
 		elif dataset == 'bbox_imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
+			#x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
+                        train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
 
 		def lr_schedule(epoch, lr, base_lr):
 			#keeps learning rate to a schedule
-                        scale = num_transformers if shared else 0
-
 			if epoch > 360:
-				lr = base_lr * 0.5e-3 / scale
+				lr = base_lr * 0.5e-3
 			elif epoch > 320:
-				lr = base_lr * 1e-3 / scale
+				lr = base_lr * 1e-3
 			elif epoch > 240:
-				lr = base_lr * 1e-2 / scale
+				lr = base_lr * 1e-2
 			elif epoch > 160:
-				lr = base_lr * 1e-1 / scale
-
-			return lr
+				lr = base_lr * 1e-1
+			
+			return lr / scale
 	elif dataset == 'imagenet100' or dataset == 'imagenet':
 		base_lr=1e-1
 		batch_size=256
@@ -254,7 +257,7 @@ with distribution.scope():
 
 		train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 
-		if dataset == 'imagenet100':        
+		if dataset == 'imagenet100':	    
 			#epochs = 130
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
@@ -268,8 +271,8 @@ with distribution.scope():
 				elif epoch > 30:
 					lr = base_lr * 1e-1
 
-				return lr
-		else:        
+				return lr / scale
+		else:	     
 			#epochs = 90
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
@@ -280,7 +283,7 @@ with distribution.scope():
 				elif epoch > 30:
 					lr = base_lr * 1e-1
 
-				return lr
+				return lr / scale
 	elif dataset == 'cifar10' or dataset == 'integer_cifar10':
 		checkpoint_interval=999
 
@@ -303,27 +306,26 @@ with distribution.scope():
 		if not adv_train:
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
-
-			    if epoch > 180:
-			        lr = base_lr * 0.5e-3
-			    elif epoch > 160:
-			        lr = base_lr * 1e-3
-			    elif epoch > 120:
-			        lr = base_lr * 1e-2
-			    elif epoch > 80:
-			        lr = base_lr * 1e-1
-
-			    return lr
+				if epoch > 180:
+					lr = base_lr * 0.5e-3
+				elif epoch > 160:
+					lr = base_lr * 1e-3
+				elif epoch > 120:
+					lr = base_lr * 1e-2
+				elif epoch > 80:
+					lr = base_lr * 1e-1
+					
+				return lr / scale
 		else:
-                        def lr_schedule(epoch, lr, base_lr):
-                                #keeps learning rate to a schedule
+			def lr_schedule(epoch, lr, base_lr):
+				#keeps learning rate to a schedule
 
-                            if epoch > 125:
-                                lr = base_lr * 1e-2
-                            elif epoch > 85:
-                                lr = base_lr * 1e-1
+                                if epoch > 125:
+                                        lr = base_lr * 1e-2
+                                elif epoch > 85:
+                                        lr = base_lr * 1e-1
 
-                            return lr
+                                return lr
 	elif dataset == 'cluttered_mnist':
 		#epochs=100
 		base_lr=1e-3
@@ -334,18 +336,18 @@ with distribution.scope():
 		x_train, y_train, x_test, y_test = datasets.load_cluttered_mnist(only_test=only_evaluate)
 
 		def lr_schedule(epoch, lr, base_lr):
-			#keeps learning rate to a schedule
+                        #keeps learning rate to a schedule
 
-		    if epoch > 90:
-		        lr = base_lr * 0.5e-3
-		    elif epoch > 80:
-		        lr = base_lr * 1e-3
-		    elif epoch > 60:
-		        lr = base_lr * 1e-2
-		    elif epoch > 40:
-		        lr = base_lr * 1e-1
-
-		    return lr
+                        if epoch > 90:
+                                lr = base_lr * 0.5e-3
+                        elif epoch > 80:
+                                lr = base_lr * 1e-3
+                        elif epoch > 60:
+                                lr = base_lr * 1e-2
+                        elif epoch > 40:
+                                lr = base_lr * 1e-1
+                                
+                        return lr / scale
 	elif dataset == 'test10':
 		#epochs=3
 		base_lr=1e-6
@@ -382,7 +384,7 @@ with distribution.scope():
 
 		callbacks = [lr_scheduler, oldest_model_saver]
 
-		if dataset == 'imagenet100' or dataset =='imagenet':
+		if dataset == 'imagenet100' or dataset =='imagenet' or 'imagenet10':
 			#stream from tfrecords
 			#note: does not exactly partition train/test epochs
 
@@ -413,18 +415,18 @@ with distribution.scope():
 
 				#allowed sets for mechanism gaze
 				if model_tag == 'resnet_cifar':
-					if coarse_fixations:    
-						if upsample_fixations:    
+					if coarse_fixations:	
+						if upsample_fixations:	  
 							gaze_val = 8
 						else:
 							gaze_val = 4
 					elif sampling:
-						gaze_val = 8                   
+						gaze_val = 8		       
 					elif cifar_ecnn:
 						gaze_val = 4   
 					else:
-						gaze_val = 0             
-                
+						gaze_val = 0		 
+		
 				#for each epoch
 				for epoch_i in range(epochs):
 					#shuffle
@@ -449,7 +451,7 @@ with distribution.scope():
 						x_batch_augmented = glimpse.image_augmentation(x_batch, dataset).numpy()
 
 						#choose a point of fixation
-						if model_tag == 'resnet_cifar':                        
+						if model_tag == 'resnet_cifar':			       
 							if gaze_val == 0:
 								#dummy val for no gaze
 								gaze_x = 999
@@ -460,12 +462,12 @@ with distribution.scope():
 							gaze = [gaze_x, gaze_y]
 						else:
 							gaze = None
-                            
+			    
 						#get adv examples
 						x_batch_adv = distribution.experimental_run_v2(attack_backbone.perturb, args=(x_batch_augmented,y_batch), kwargs={'model': model, 'gaze': gaze})
 
 						#train on adv examples
-						if gaze is None:                        
+						if gaze is None:			
 							metrics = train_model_on_batch(x_batch_adv, y_batch)
 						else:
 							metrics = train_model_on_batch([ x_batch_adv, np.tile([gaze], (len(x_batch_adv),1)) ], y_batch)
@@ -473,7 +475,7 @@ with distribution.scope():
 						batch_end = time.time()
 						print('epoch {} batch {}/{} took {:3f}s. with gaze {}: loss {}, acc {}'.format(epoch_i, batch_i, num_batches, batch_end - batch_start, gaze, metrics[0], metrics[1]))
 
-					if gaze is None:                                  
+					if gaze is None:				  
 						metrics = model.evaluate(x_test, y_test, batch_size=batch_size, verbose=0)
 					else:
 						print('validation gaze: {}'.format(gaze))
@@ -501,11 +503,11 @@ with distribution.scope():
 
 	for _ in range(repeats):
 
-		if dataset == 'imagenet100' or dataset == 'imagenet':
+		if dataset == 'imagenet100' or dataset == 'imagenet' or dataset=='imagenet10':
 			scores = model.evaluate(test_dataset, steps=validation_steps, verbose=0)
 		else:
 			if (not only_evaluate) and adv_train and model_tag == 'resnet_cifar':
-				assert(not auxiliary)                
+				assert(not auxiliary)		     
 				scores = model.evaluate([ x_test, np.tile([[0,0]], (len(x_test),1)) ], y_test, verbose=0)
 			else:
 				if not auxiliary:	
