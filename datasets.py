@@ -19,7 +19,7 @@ FILE_PATH = '/om5/user/kappa666/Attention-against-adversaries'
 def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, batch_size=256, subsample=False):
 	# imagenet datasets (100 randomly pre-selected classes or full)
 
-	if data_dir != 'imagenet100' and data_dir != 'imagenet':
+	if data_dir != 'imagenet100' and data_dir != 'imagenet' and data_dir != 'imagenet10':
 		raise ValueError
 	
 	if subsample:
@@ -32,6 +32,9 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 	shortlist = None
 	if data_dir == 'imagenet100':
 		shortlist_loc = '{}/imagenet100/shortlist.pickle'.format(FILE_PATH)
+		shortlist = pickle.load(open(shortlist_loc, 'rb'))
+	if data_dir == 'imagenet10':
+		shortlist_loc = '{}/imagenet10/shortlist.pickle'.format(FILE_PATH)
 		shortlist = pickle.load(open(shortlist_loc, 'rb'))
 
 	train_cache_pattern = '{}/{}/train-*'.format(FILE_PATH, data_dir)
@@ -77,13 +80,13 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 def _build_imagenet(data_dir, shortlist):
 	# build imagenet tfrecords
 
-	train_data_dir = './../data/ImageNet/raw-data/train'
-	test_data_dir = './../data/ImageNet/raw-data/validation'
+	train_data_dir = "/om5/user/kappa666/Attention-against-adversaries/imagenet10/train" #"/om5/user/kappa666/ECNN/ILSVRC/Data/CLS-LOC/train" #'./../data/ImageNet/raw-data/train'
+	test_data_dir =  "/om5/user/kappa666/Attention-against-adversaries/imagenet10/val" #"/om5/user/kappa666/ECNN/ILSVRC/Data/CLS-LOC/val"  #'./../data/ImageNet/raw-data/validation'
 
 	class_id_to_name = {}
 	class_name_to_id = {}	
 
-	if data_dir == 'imagenet100':
+	if data_dir == 'imagenet100' or data_dir == 'imagenet10':
 		train_data_dir_files = [i for i in os.listdir(train_data_dir) if i in shortlist]
 		test_data_dir_files = [i for i in os.listdir(test_data_dir) if i in shortlist]
 	elif data_dir == 'imagenet':
@@ -103,6 +106,8 @@ def _build_imagenet(data_dir, shortlist):
 		assert(num_classes == 100)
 	elif data_dir == 'imagenet':
 		assert(num_classes == 1000)
+	elif data_dir == 'imagenet10':
+		assert(num_classes == 10)
 	else:
 		raise ValueError
 
@@ -120,7 +125,7 @@ def _load_images_gen(data_dir, class_name_to_id, data_dir_tag, shortlist, size):
 
 	if data_dir_tag == 'imagenet':
 		assert(shortlist is None)
-	elif data_dir_tag == 'imagenet100':
+	elif data_dir_tag == 'imagenet100' or data_dir_tag == 'imagenet10':
 		assert(shortlist is not None)
 	else:
 		raise ValueError
@@ -128,7 +133,7 @@ def _load_images_gen(data_dir, class_name_to_id, data_dir_tag, shortlist, size):
 	class_and_image_names = []
 
 	for class_name in os.listdir(data_dir):
-		if data_dir_tag == 'imagenet100':
+		if data_dir_tag == 'imagenet100' or data_dir_tag == 'imagenet10':
 			if class_name not in shortlist:
 				continue
 		for image in os.listdir(os.path.join(data_dir, class_name)):
@@ -248,7 +253,7 @@ def _write_records_helper(container_x, container_y, data_dir, name, current_shar
 
 	writer.close()
 
-def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
+def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False, aux_labels=False, batch_size=256):
 	# 10 classes chosen from imagenet
 	# Snake: n01742172 boa_constrictor
 	# Dog: n02099712, Labrador_retriever 
@@ -260,25 +265,13 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 	# Fish: n01484850 great_white_shark
 	# Crab: n01981276 king_crab
 	# Insect: n02206856 bee
-	batch_size = 32
 
 	bbox_tag = '' if not only_bbox else '_bbox'
-	# x_train_cache_file = '{}/cache_store/{}{}-x_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
-	# y_train_cache_file = '{}/cache_store/{}{}-y_train.pickle'.format(FILE_PATH, data_dir, bbox_tag)
-	# x_test_cache_file = '{}/cache_store/{}{}-x_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
-	# y_test_cache_file = '{}/cache_store/{}{}-y_test.pickle'.format(FILE_PATH, data_dir, bbox_tag)
-	
 	train_cache_pattern = '{}/{}/{}-train-*'.format(FILE_PATH, data_dir, bbox_tag)
 	test_cache_pattern = '{}/{}/{}-test-*'.format(FILE_PATH, data_dir, bbox_tag)
 
-	# x_train = None
-	# y_train = None
-	# x_test = None
-	# y_test = None
-
-
 	#if cache does not exist, build
-	if not (glob.glob(train_cache_pattern) or glob.glob(test_cache_pattern)):
+	if not (glob.glob(train_cache_pattern) and glob.glob(test_cache_pattern)):
 		#load raw images (resized)
 		train_data_gen, test_data_gen = _build_imagenet10(data_dir, size=320, only_test=only_test, only_bbox=only_bbox)
 
@@ -315,44 +308,6 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 		return train_dataset, test_dataset
 
 
-	# if not only_test:
-	#	files = [x_train_cache_file, y_train_cache_file, x_test_cache_file, y_test_cache_file]
-	# else:
-	#	files = [x_test_cache_file, y_test_cache_file]
-
-	# #if cache exists, load from cache
-	# if all([os.path.exists(file) for file in files]):
-	#	if not only_test:
-	#		x_train = pickle.load(open(x_train_cache_file, 'rb'))
-	#		y_train = pickle.load(open(y_train_cache_file, 'rb'))
-
-	#	x_test = pickle.load(open(x_test_cache_file, 'rb'))
-	#	y_test = pickle.load(open(y_test_cache_file, 'rb'))
-
-	# #build from raw images and save as cache
-	# else:
-		
-	#	#load raw images (resized)
-	#	# x_train, y_train, x_test, y_test = _build_imagenet10(data_dir, size=320, only_test=only_test, only_bbox=only_bbox)
-
-	#	#preprocess
-	#	if not only_test:
-	#		x_train = _preprocess_x(x_train)
-	#		y_train = _preprocess_y(y_train, 10)
-
-	#	x_test = _preprocess_x(x_test)
-	#	y_test = _preprocess_y(y_test, 10)
-
-	#	#save as cache
-	#	if not only_test:
-	#		pickle.dump(x_train, open(x_train_cache_file, 'wb'), protocol=4)
-	#		pickle.dump(y_train, open(y_train_cache_file, 'wb'), protocol=4)
-
-	#	pickle.dump(x_test, open(x_test_cache_file, 'wb'), protocol=4)
-	#	pickle.dump(y_test, open(y_test_cache_file, 'wb'), protocol=4)
-
-	# return x_train, y_train, x_test, y_test	
-
 def _build_imagenet10(data_dir, size, only_test, only_bbox):
 	# builds and dumps imagenet10 to disk
 
@@ -374,56 +329,45 @@ def _build_imagenet10(data_dir, size, only_test, only_bbox):
 	assert(np.all([i in class_id_to_name.values() for i in np.unique(os.listdir(train_data_dir))]))
 	assert(np.all([i in class_id_to_name.values() for i in np.unique(os.listdir(test_data_dir))]))
 
-	x_test = None
-	y_test = None
-	x_train = None
-	y_train = None
-
 	if not only_test:
 		train_data_gen = _load_images(train_data_dir, class_name_to_id, size, True)
 	test_data_gen = _load_images(test_data_dir, class_name_to_id, size, False)
 	return train_data_gen, test_data_gen
 
-	# if not only_test:
-	#	x_train, y_train = _load_images(train_data_dir, class_name_to_id, size, True)
-	# x_test, y_test = _load_images(test_data_dir, class_name_to_id, size, False)
-	
-	# return x_train, y_train, x_test, y_test
-	
 def _load_images(data_dir, class_name_to_id, size, bbox):
 	# read and preprocess images from disk
+	class_and_image_names = []
 
-	x_data = [] #image
-	y_data = [] #label
-	
 	for class_name in os.listdir(data_dir):
-		for image in tqdm(os.listdir(os.path.join(data_dir, class_name))):
-			file_dir = os.path.join(data_dir, class_name, image)
+		for image in os.listdir(os.path.join(data_dir, class_name)):
+			class_and_image_names.append((class_name, image))
 
-			#the image raw data
-			image_data = tf.keras.preprocessing.image.load_img(file_dir, target_size=None, color_mode='rgb')
+	np.random.shuffle(class_and_image_names)
+
+	for class_name, image in tqdm(class_and_image_names):
+		file_dir = os.path.join(data_dir, class_name, image)
+
+		#the image raw data
+		image_data = tf.keras.preprocessing.image.load_img(file_dir, target_size=None, color_mode='rgb')
 			
-			if bbox:
-				#crop to bounding box if exists, else ignore image
-				coords = _bbox_coords(file_dir)
-				if coords is None:
-					#no bbox exists, skip
-					continue
-				else:
-					#bbox exists, crop image
-					xmin, xmax, ymin, ymax = coords
-					image_data = image_data.crop((xmin, ymin, xmax, ymax)) 
+		if bbox:
+			#crop to bounding box if exists, else ignore image
+			coords = _bbox_coords(file_dir)
+			if coords is None:
+				#no bbox exists, skip
+				continue
+			else:
+				#bbox exists, crop image
+				xmin, xmax, ymin, ymax = coords
+				image_data = image_data.crop((xmin, ymin, xmax, ymax)) 
 
-			#the image label per assignments generated above
-			image_label = class_name_to_id[class_name]
-
-			#resize to 320, 320
-			image_data = _resize_image(image_data, size)		     
-			yield image_data, image_label
-	#		x_data.append(image_data)
-	#		y_data.append(image_label)
-			
-	# return np.array(x_data), np.array(y_data)
+		#the image label per assignments generated above
+		image_label = class_name_to_id[class_name]
+		
+		#resize to 320, 320
+		image_data = _resize_image(image_data, size)		     
+		
+		yield image_data, image_label
 
 def _bbox_coords(image_file_dir):
 	#returns bbox coords given image file if exists

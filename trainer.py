@@ -15,6 +15,7 @@ import tensorflow as tf
 
 from functools import partial
 from datasets import _preprocess_y
+from math import ceil
 
 #input args
 parser = argparse.ArgumentParser()
@@ -217,18 +218,20 @@ with distribution.scope():
 		scale = 1
 	#load dataset, set defaults
 	if dataset == 'imagenet10' or dataset == 'bbox_imagenet10':
+		train_dataset_size = 5659
+		test_dataset_size = 500
 		#epochs=400
 		base_lr=1e-3
-		batch_size=64
+		batch_size=1
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
+		steps_per_epoch = ceil(train_dataset_size / batch_size)
+		validation_steps = ceil(test_dataset_size / batch_size)
 
 		if dataset == 'imagenet10':
-			#x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
-                        train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False)
+			train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 		elif dataset == 'bbox_imagenet10':
-			#x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
-                        train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True)
+			train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True, aux_labels=auxiliary, batch_size=batch_size)
 
 		def lr_schedule(epoch, lr, base_lr):
 			#keeps learning rate to a schedule
@@ -243,17 +246,19 @@ with distribution.scope():
 			
 			return lr / scale
 	elif dataset == 'imagenet100' or dataset == 'imagenet':
+		train_dataset_size = 1281167
+		test_dataset_size = 50000
 		base_lr=1e-1
 		batch_size=256
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.SGD(learning_rate=base_lr, decay=1e-4, momentum=0.9)
 
 		if dataset == 'imagenet100':
-			steps_per_epoch = 502
-			validation_steps = 20
+			steps_per_epoch = ceil(train_dataset_size / 10 / batch_size)
+			validation_steps = ceil(test_dataset_size / 10 / batch_size)
 		else:
-			steps_per_epoch = 5005
-			validation_steps = 196
+			steps_per_epoch = ceil(train_dataset_size / batch_size)
+			validation_steps = ceil(test_dataset_size / batch_size)
 
 		train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 
@@ -320,12 +325,12 @@ with distribution.scope():
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
 
-                                if epoch > 125:
-                                        lr = base_lr * 1e-2
-                                elif epoch > 85:
-                                        lr = base_lr * 1e-1
+				if epoch > 125:
+					lr = base_lr * 1e-2
+				elif epoch > 85:
+					lr = base_lr * 1e-1
 
-                                return lr
+				return lr
 	elif dataset == 'cluttered_mnist':
 		#epochs=100
 		base_lr=1e-3
@@ -336,18 +341,18 @@ with distribution.scope():
 		x_train, y_train, x_test, y_test = datasets.load_cluttered_mnist(only_test=only_evaluate)
 
 		def lr_schedule(epoch, lr, base_lr):
-                        #keeps learning rate to a schedule
+			#keeps learning rate to a schedule
 
-                        if epoch > 90:
-                                lr = base_lr * 0.5e-3
-                        elif epoch > 80:
-                                lr = base_lr * 1e-3
-                        elif epoch > 60:
-                                lr = base_lr * 1e-2
-                        elif epoch > 40:
-                                lr = base_lr * 1e-1
-                                
-                        return lr / scale
+			if epoch > 90:
+				lr = base_lr * 0.5e-3
+			elif epoch > 80:
+				lr = base_lr * 1e-3
+			elif epoch > 60:
+				lr = base_lr * 1e-2
+			elif epoch > 40:
+				lr = base_lr * 1e-1
+				
+			return lr / scale
 	elif dataset == 'test10':
 		#epochs=3
 		base_lr=1e-6
@@ -384,7 +389,7 @@ with distribution.scope():
 
 		callbacks = [lr_scheduler, oldest_model_saver]
 
-		if dataset == 'imagenet100' or dataset =='imagenet' or 'imagenet10':
+		if dataset == 'imagenet100' or dataset =='imagenet' or dataset == 'imagenet10':
 			#stream from tfrecords
 			#note: does not exactly partition train/test epochs
 
