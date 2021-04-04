@@ -222,7 +222,7 @@ with distribution.scope():
 		test_dataset_size = 500
 		#epochs=400
 		base_lr=1e-3
-		batch_size=1
+		batch_size=128
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
 		steps_per_epoch = ceil(train_dataset_size / batch_size)
