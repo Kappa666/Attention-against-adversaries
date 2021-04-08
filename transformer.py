@@ -45,7 +45,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
     B = tf.shape(input_fmap)[0]
     H = tf.shape(input_fmap)[1]
     W = tf.shape(input_fmap)[2]
-        
+    
     # reshape theta to (B, 2, 3)
     if restricted_theta:
         theta_full = tf.unstack(tf.zeros(shape=(B, 6)), axis=1)
@@ -56,6 +56,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
         theta_full[5] = theta[:,3]
         
         theta = tf.stack(theta_full, axis=1)
+    
     theta = tf.reshape(theta, [B, 2, 3])
 
     # generate grids of same size or upsample/downsample if specified
@@ -196,14 +197,26 @@ def bilinear_sampler(img, x, y):
     # rescale x and y to [0, W-1/H-1]
     x = tf.cast(x, 'float32')
     y = tf.cast(y, 'float32')
-    x = 0.5 * ((x + 1.0) * tf.cast(max_x-1, 'float32'))
-    y = 0.5 * ((y + 1.0) * tf.cast(max_y-1, 'float32'))
+    
+    x = 0.5 * (x + 1.0)
+    y = 0.5 * (y + 1.0)
+
+    xmin = x[:, 0, 0]
+    xmax = x[:, 319, 319]
+    ymin = y[:, 0, 0]
+    ymax = y[:, 319, 319]
+    bounding_box = tf.stack([ymin, xmin, ymax, xmax])
+
+    x = x * tf.cast(max_x-1, 'float32')
+    y = y * tf.cast(max_y-1, 'float32')
 
     # grab 4 nearest corner points for each (x_i, y_i)
     x0 = tf.cast(tf.floor(x), 'int32')
     x1 = x0 + 1
     y0 = tf.cast(tf.floor(y), 'int32')
     y1 = y0 + 1
+
+    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
 
     # clip to range [0, H-1/W-1] to not violate img boundaries
     x0 = tf.clip_by_value(x0, zero, max_x)
@@ -238,4 +251,4 @@ def bilinear_sampler(img, x, y):
     # compute output
     out = tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
 
-    return out
+    return out, bounding_box, center
