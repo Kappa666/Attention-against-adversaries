@@ -144,41 +144,48 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 		x = layers.Lambda(lambda tensor: glimpse.image_augmentation(tensor, dataset='imagenet10'), name='image_augmentation')(model_input)
 	else:
 		x = model_input
-	
+
+	attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False,
+						dummy_scaled_attention=False, num_outputs=num_transformers)
+	theta = attn_network(x)
+
 	x_transformed = [None]*num_transformers
 	if shared:
 		resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 		resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 	
 		for i in range(num_transformers):
-			attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
-			theta = attn_network(x)
+			# attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
+			# theta = attn_network(x)
 
 			# test with identity transformation
 			# theta = tf.constant([1., 0, 0, 0, 1., 0])
 			# dim = tf.reshape(tf.shape(x)[0], [1])
 			# theta = tf.tile(theta, dim)
+
+			theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
 			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
 												   out_dims=[base_model_input_shape[0], 
 													     base_model_input_shape[1]], 
 												   restricted_theta=restricted_attention), 
-					    name=f'transformer-{i}')([x, theta])
+					    name=f'transformer-{i}')([x, theta_i])[0]
 			x_transformed[i] = resnet_model(x_i)
 	else:
 		for i in range(num_transformers):
-			attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
-			theta = attn_network(x)
+			# attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
+			# theta = attn_network(x)
 
 			# test with identity transformation
 			# theta = tf.constant([1., 0, 0, 0, 1., 0])
 			# dim = tf.reshape(tf.shape(x)[0], [1])
 			# theta = tf.tile(theta, dim)
 		
+			theta_i	= theta[:, i*num_theta_params:(i+1)*num_theta_params]
 			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
 												   out_dims=[base_model_input_shape[0], 
 													     base_model_input_shape[1]], 
 												   restricted_theta=restricted_attention), 
-					    name=f'transformer-{i}')([x, theta])
+					    name=f'transformer-{i}')([x, theta_i])[0]
 			resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 			x_transformed[i] = resnet_model(x_i)
@@ -591,22 +598,22 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 
 	return model
 
-def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention):
+def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention, num_outputs=1):
 	#build attention network
 	
 	assert(type(input_shape) == tuple)
 	if num_coords != 6 and num_coords != 4 and num_coords != 2:
 		raise NotImplementedError
 
-	#attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
+	attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
 
-	attn_in = layers.Input(shape=input_shape)
+	# attn_in = layers.Input(shape=input_shape)
 
-	attn_x = layers.Flatten()(attn_in)
-	attn_x = layers.Dense(50, activation='tanh')(attn_x)
-	attn_out = layers.Dropout(0.2)(attn_x)
+	# attn_x = layers.Flatten()(attn_in)
+	# attn_x = layers.Dense(50, activation='tanh')(attn_x)
+	# attn_out = layers.Dropout(0.2)(attn_x)
 
-	attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
+	# attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
 
 	model_input = layers.Input(shape=input_shape)
 	x = attention_network(model_input)
@@ -620,11 +627,14 @@ def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_
 		bias_init = [1., 0., 1., 0.]
 	elif num_coords == 2:
 		bias_init = [0., 0.]
-    
-	model_output = layers.Dense(num_coords, activation='tanh', kernel_initializer=tf.zeros_initializer(), bias_initializer=tf.constant_initializer(bias_init))(x)
+    	
+	bias_init = [val for _ in range(num_outputs) for val in bias_init]
+	
+	model_output = layers.Dense(num_coords * num_outputs, activation='tanh', kernel_initializer=tf.zeros_initializer(), bias_initializer=tf.constant_initializer(bias_init))(x)
 
 	attn_model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
 	if dummy_attention or dummy_scaled_attention:
 		attn_model.trainable = False
 
 	return attn_model
+
