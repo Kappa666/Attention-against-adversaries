@@ -67,6 +67,8 @@ parser.add_argument('--staggered_build_code', default=0)
 #transformer options
 parser.add_argument('--num_transformers', default=5)
 parser.add_argument('--save_images', default=0)
+parser.add_argument('--shared', default=0)
+parser.add_argument('--restricted_attention', default=0)
 
 args = vars(parser.parse_args())
 
@@ -112,6 +114,8 @@ staggered_build_code = int(args['staggered_build_code'])
 
 num_transformers = int(args['num_transformers'])
 save_images = bool(int(args['save_images']))
+shared = bool(int(args['shared']))
+restricted_attention = bool(int(args['restricted_attention']))
 
 save_file = '{}/model_checkpoints/{}.h5'.format(FILE_PATH, name)
 print(save_file)
@@ -324,7 +328,7 @@ elif model == 'ecnn':
 elif model == 'parallel_transformers':
 	
 	def build_model():
-		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, num_transformers=num_transformers)
+		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, num_transformers=num_transformers, shared=shared, restricted_attention = restricted_attention)
 
 	if not stochastic_model:
                 model = build_model()
@@ -339,7 +343,8 @@ model.summary()
 
 #load datasets
 if dataset == 'imagenet10':
-	x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=True, only_bbox=False)
+	batch_size = 32
+	train_dataset, test_dataset = datasets.load_imagenet(data_dir='imagenet10', only_test=True, batch_size=batch_size)
 	num_test_samples = 500
 elif dataset == 'bbox_imagenet10':
 	x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=True, only_bbox=True)
@@ -370,15 +375,26 @@ else:
 
 #save some transformed images
 if model_tag == 'parallel_transformers' and dataset == 'imagenet10' and save_images:
-	for img_ind in range(0, 500, 50):
-		img = x_test[img_ind]
-		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), img)
-		for i in range(5):
+	img_ind = 0
+	for x_test, _ in test_dataset:
+	# for img_ind in range(0, 500, 50):
+		img = tf.reshape(x_test[0], [1, 320, 320, 3])
+		box_img = img
+
+		for i in range(num_transformers):
 			transformer = tf.keras.Model(model.inputs, model.get_layer(f'transformer-{i}').output)
-			img_new = tf.reshape(img, [1, 320, 320, 3])
-			img_new = transformer(img_new)
+			img_new, box, center = transformer(img)
 			img_new = tf.reshape(img_new, [320, 320, 3])
 			tf.keras.preprocessing.image.save_img('{}/images/test-{}-{}.png'.format(FILE_PATH, img_ind, i), img_new)
+
+			box = tf.reshape(box, [1, 1, 4])
+			color = tf.reshape(tf.constant([1.0, 0.0, 0.0]), [1, 3])
+			box_img = tf.image.draw_bounding_boxes(box_img, box, color)
+
+		box_img = tf.reshape(box_img, [320, 320, 3])
+		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), box_img)
+
+		img_ind += batch_size
 
 #run adversary evaluations
 if evaluate_mode == 'robustness':
@@ -412,13 +428,13 @@ if evaluate_mode == 'robustness':
 
 	print('scanning epsilons: {}'.format(epsilons))
 
-	if dataset != 'imagenet100' and dataset != 'imagenet':
+	if dataset != 'imagenet10' and dataset != 'imagenet100' and dataset != 'imagenet':
 		x_test_backup = x_test.copy()
 		y_test_backup = y_test.copy()
 
 	for e in epsilons:
 
-		if dataset != 'imagenet100' and dataset != 'imagenet':
+		if dataset != 'imagenet10' and dataset != 'imagenet100' and dataset != 'imagenet':
 			#refresh copy of test images
 			x_test = x_test_backup.copy()
 			y_test = y_test_backup.copy()		
