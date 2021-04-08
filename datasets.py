@@ -80,8 +80,8 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 def _build_imagenet(data_dir, shortlist):
 	# build imagenet tfrecords
 
-	train_data_dir = filepath + "imagenet10/train"
-	test_data_dir =  filepath + "imagenet10/val"
+	train_data_dir = FILE_PATH + "/imagenet10/train"
+	test_data_dir =  FILE_PATH + "/imagenet10/val"
 
 	class_id_to_name = {}
 	class_name_to_id = {}	
