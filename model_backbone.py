@@ -605,7 +605,10 @@ def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_
 	if num_coords != 6 and num_coords != 4 and num_coords != 2:
 		raise NotImplementedError
 
-	attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
+	resnet_model = resnet(base_model_input_shape=input_shape, augment=False, coarse_fixations=False)
+	attention_network = tf.keras.models.Sequential(resnet_model.layers[:-1])
+
+	# attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
 
 	# attn_in = layers.Input(shape=input_shape)
 
