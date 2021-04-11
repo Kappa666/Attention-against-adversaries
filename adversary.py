@@ -375,24 +375,28 @@ else:
 
 #save some transformed images
 if model_tag == 'parallel_transformers' and dataset == 'imagenet10' and save_images:
+	colors = tf.constant([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0]])
+
 	img_ind = 0
 	for x_test, _ in test_dataset:
-	# for img_ind in range(0, 500, 50):
+		boxes = []
 		img = tf.reshape(x_test[0], [1, 320, 320, 3])
-		box_img = img
 
 		for i in range(num_transformers):
 			transformer = tf.keras.Model(model.inputs, model.get_layer(f'transformer-{i}').output)
 			img_new, box, center = transformer(img)
+
 			img_new = tf.reshape(img_new, [320, 320, 3])
 			tf.keras.preprocessing.image.save_img('{}/images/test-{}-{}.png'.format(FILE_PATH, img_ind, i), img_new)
 
-			box = tf.reshape(box, [1, 1, 4])
-			color = tf.reshape(tf.constant([1.0, 0.0, 0.0]), [1, 3])
-			box_img = tf.image.draw_bounding_boxes(box_img, box, color)
+			minx, maxx = min(box[1][0], box[3][0]).numpy(), max(box[1][0], box[3][0]).numpy()
+			miny, maxy = min(box[0][0], box[2][0]).numpy(), max(box[0][0], box[2][0]).numpy()
+			boxes.append([miny, minx, maxy, maxx])
 
-		box_img = tf.reshape(box_img, [320, 320, 3])
-		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), box_img)
+		boxes = tf.reshape(tf.constant(boxes), (1, num_transformers, 4))
+		img = tf.image.draw_bounding_boxes(img, boxes, colors)
+		img = tf.reshape(img, [320, 320, 3])
+		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), img)
 
 		img_ind += batch_size
 

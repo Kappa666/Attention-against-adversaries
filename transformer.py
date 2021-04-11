@@ -201,12 +201,6 @@ def bilinear_sampler(img, x, y):
     x = 0.5 * (x + 1.0)
     y = 0.5 * (y + 1.0)
 
-    xmin = x[:, 0, 0]
-    xmax = x[:, 319, 319]
-    ymin = y[:, 0, 0]
-    ymax = y[:, 319, 319]
-    bounding_box = tf.stack([ymin, xmin, ymax, xmax])
-
     x = x * tf.cast(max_x-1, 'float32')
     y = y * tf.cast(max_y-1, 'float32')
 
@@ -216,13 +210,21 @@ def bilinear_sampler(img, x, y):
     y0 = tf.cast(tf.floor(y), 'int32')
     y1 = y0 + 1
 
-    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
-
     # clip to range [0, H-1/W-1] to not violate img boundaries
     x0 = tf.clip_by_value(x0, zero, max_x)
     x1 = tf.clip_by_value(x1, zero, max_x)
     y0 = tf.clip_by_value(y0, zero, max_y)
     y1 = tf.clip_by_value(y1, zero, max_y)
+
+    x_bb = tf.cast(x0, 'float32') / tf.cast(max_x-1, 'float32')
+    y_bb = tf.cast(y0, 'float32') / tf.cast(max_y-1, 'float32')
+    xmin = x_bb[:, 0, 0]
+    xmax = x_bb[:, 319, 319]
+    ymin = y_bb[:, 0, 0]
+    ymax = y_bb[:, 319, 319]
+    bounding_box = tf.stack([ymin, xmin, ymax, xmax])
+
+    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
 
     # get pixel value at corner coords
     Ia = get_pixel_value(img, x0, y0)
