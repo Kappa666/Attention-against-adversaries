@@ -387,7 +387,6 @@ def warp_func(xy, orig_img_size, func, func_pars, shift, gaze):
 	xy_out = tf.cast(xy_out, tf.int32)
 	return xy_out
 
-
 def warp_image(img, output_size, input_size, gaze, shift=None):
 	"""
 	:param img: (tensor) input image
@@ -508,6 +507,61 @@ def warp_imagebatch(img, output_size, input_size, gaze, shift=None):
 	out = tf.reshape(tf.gather_nd(img, ixy_out), [num_images, output_size, output_size, 3]) 
 
 	return out
+
+def warp_image_multi_gaze(img, output_size, input_size, gaze, shift=None):
+	original_shape = img[0].shape
+	num_images = tf.shape(img)[0]
+	assert(len(original_shape) == 3)
+
+	retina_pars, retina_func = cached_find_retina_mapping(input_size, output_size)
+
+	assert(isinstance(gaze, int) or isinstance(gaze, list) or tf.is_tensor(gaze))
+	if isinstance(gaze, int):
+		gaze_x = tf.random.uniform(shape=[], minval=-gaze, maxval=gaze, dtype=tf.int32)
+		gaze_y = tf.random.uniform(shape=[], minval=-gaze, maxval=gaze, dtype=tf.int32)
+		gaze = tf.cast([[gaze_x, gaze_y]], tf.float32)
+	elif isinstance(gaze, list):
+		assert(len(gaze) == 2)
+		gaze = tf.cast([gaze], tf.float32)
+	elif tf.is_tensor(gaze):
+		gaze = tf.cast([gaze], tf.float32)
+	else:
+		raise ValueError
+
+	if shift is None:
+		shift = [tf.constant([0], tf.float32), tf.constant([0], tf.float32)]
+	else:
+		assert len(shift) == 2
+		shift = [tf.constant([shift[0]], tf.float32), tf.constant([shift[1]], tf.float32)]
+
+	paddings = tf.constant([[0,0], [2, 2], [2, 2], [0, 0]])
+	img = tf.pad(img, paddings, "CONSTANT")
+
+	row_ind = tf.tile(tf.expand_dims(tf.range(output_size), axis=-1), [1, output_size])
+	row_ind = tf.reshape(row_ind, [-1, 1])
+	col_ind = tf.tile(tf.expand_dims(tf.range(output_size), axis=0), [1, output_size])
+	col_ind = tf.reshape(col_ind, [-1, 1])
+	indices = tf.concat([row_ind, col_ind], 1)
+	indices = tf.expand_dims(indices, axis=-1)
+	indices = tf.tile(indices, (1, 1, num_images))
+
+	xy_out = warp_func(indices, tf.cast(original_shape, tf.float32), retina_func, retina_pars, shift, gaze)
+	xy_out = tf.reshape(xy_out, (num_images, input_size*input_size, 2))
+
+	#tf.repeat hack for tf2.0 (https://stackoverflow.com/questions/35361467/tensorflow-numpy-repeat-alternative)
+	image_ind = tf.range(num_images)
+	image_ind = tf.reshape(image_ind, [-1, 1])
+	image_ind = tf.tile(image_ind, [1, input_size*input_size])
+	image_ind = tf.reshape(image_ind, [-1])
+	image_ind = image_ind[..., tf.newaxis]
+	image_ind = tf.reshape(image_ind, (num_images, input_size*input_size, 1))
+
+	ixy_out = tf.concat([image_ind, xy_out], axis=2)
+
+	out = tf.reshape(tf.gather_nd(img, ixy_out), [num_images, output_size, output_size, 3])
+
+	return out
+
 
 ########################################################### DEPRECATED FUNCTIONS ###########################################################
 ############################################################################################################################################

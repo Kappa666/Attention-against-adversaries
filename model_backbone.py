@@ -149,47 +149,29 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 						dummy_scaled_attention=False, num_outputs=num_transformers)
 	theta = attn_network(x)
 
+	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
+	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
+
 	x_transformed = [None]*num_transformers
-	if shared:
-		resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
-		resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
-	
-		for i in range(num_transformers):
-			# attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
-			# theta = attn_network(x)
+	for i in range(num_transformers):
+		theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
+		_, _, gaze_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
+												    out_dims=[base_model_input_shape[0], 
+												     	      base_model_input_shape[1]], 
+											   	    restricted_theta=restricted_attention), 
+				    	     name=f'transformer-{i}')([x, theta_i])
 
-			# test with identity transformation
-			# theta = tf.constant([1., 0, 0, 0, 1., 0])
-			# dim = tf.reshape(tf.shape(x)[0], [1])
-			# theta = tf.tile(theta, dim)
+		x_i = layers.Lambda(lambda tensor: glimpse.warp_image_multi_gaze(tensor[0],
+										 output_size=base_model_input_shape[0],
+										 input_size=base_model_input_shape[0],
+										 gaze=tensor[1]),
+				    name=f'nonuniform_sampling-{i}')([x, gaze_i])
 
-			theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
-			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
-												   out_dims=[base_model_input_shape[0], 
-													     base_model_input_shape[1]], 
-												   restricted_theta=restricted_attention), 
-					    name=f'transformer-{i}')([x, theta_i])[0]
-			x_transformed[i] = resnet_model(x_i)
-	else:
-		for i in range(num_transformers):
-			# attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False, dummy_scaled_attention=False)
-			# theta = attn_network(x)
-
-			# test with identity transformation
-			# theta = tf.constant([1., 0, 0, 0, 1., 0])
-			# dim = tf.reshape(tf.shape(x)[0], [1])
-			# theta = tf.tile(theta, dim)
-		
-			theta_i	= theta[:, i*num_theta_params:(i+1)*num_theta_params]
-			x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
-												   out_dims=[base_model_input_shape[0], 
-													     base_model_input_shape[1]], 
-												   restricted_theta=restricted_attention), 
-					    name=f'transformer-{i}')([x, theta_i])[0]
+		if not shared:
 			resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
-			x_transformed[i] = resnet_model(x_i)
 
+		x_transformed[i] = resnet_model(x_i)
 	x = layers.concatenate(x_transformed)
 
 	if not return_logits:

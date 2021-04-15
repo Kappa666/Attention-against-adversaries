@@ -71,9 +71,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
     y_s = batch_grids[:, 1, :, :]
 
     # sample input with grid to get output
-    out_fmap = bilinear_sampler(input_fmap, x_s, y_s)
-
-    return out_fmap
+    return bilinear_sampler(input_fmap, x_s, y_s)
 
 
 def get_pixel_value(img, x, y):
@@ -223,8 +221,7 @@ def bilinear_sampler(img, x, y):
     ymin = y_bb[:, 0, 0]
     ymax = y_bb[:, 319, 319]
     bounding_box = tf.stack([ymin, xmin, ymax, xmax])
-
-    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
+    center = [x0[:, 160, 160], y0[:, 160, 160]]
 
     # get pixel value at corner coords
     Ia = get_pixel_value(img, x0, y0)
