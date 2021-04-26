@@ -8,9 +8,10 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 import numpy as np
 
+import transformer
+
 from scipy.optimize import curve_fit, brenth
 from functools import partial
-
 def image_augmentation(image, dataset):
 	#image augmentations
 
@@ -387,6 +388,33 @@ def warp_func(xy, orig_img_size, func, func_pars, shift, gaze):
 	xy_out = tf.cast(xy_out, tf.int32)
 	return xy_out
 
+def warp_func_multi_gaze(xy, orig_img_size, func, func_pars, shift, gaze):
+        # Centeralize the indices [-n, n]
+        xy = tf.cast(xy, tf.float32)
+        center = tf.reduce_mean(xy, axis=0)
+        xy_cent = xy - center - gaze
+
+        # Polar coordinates
+        r = tf.sqrt(xy_cent[:, 0] ** 2 + xy_cent[:, 1] ** 2)
+        theta = tf.atan2(xy_cent[:, 1], xy_cent[:, 0])
+        r = func(r, func_pars)
+
+        xs = r * tf.cos(theta)
+        xs += gaze[0][0]
+        xs += orig_img_size[0] / 2. - shift[0]
+
+        # Added + 2.0 is for the additional zero padding
+        xs = tf.minimum(orig_img_size[0] + 2.0, xs)
+        xs = tf.maximum(0., xs)
+
+        ys = r * tf.sin(theta)
+        ys += gaze[0][1]
+        ys += orig_img_size[1] / 2 - shift[1]
+        ys = tf.minimum(orig_img_size[1] + 2.0, ys)
+        ys = tf.maximum(0., ys)
+
+        return xs, ys
+
 def warp_image(img, output_size, input_size, gaze, shift=None):
 	"""
 	:param img: (tensor) input image
@@ -491,8 +519,7 @@ def warp_imagebatch(img, output_size, input_size, gaze, shift=None):
 	col_ind = tf.reshape(col_ind, [-1, 1])
 	indices = tf.concat([row_ind, col_ind], 1)
 	xy_out = warp_func(indices, tf.cast(original_shape, tf.float32), retina_func, retina_pars, shift, gaze)	
-	
-	
+
 	#tf.repeat hack for tf2.0 (https://stackoverflow.com/questions/35361467/tensorflow-numpy-repeat-alternative)
 	image_ind = tf.range(num_images)
 	image_ind = tf.reshape(image_ind, [-1, 1])
@@ -544,24 +571,66 @@ def warp_image_multi_gaze(img, output_size, input_size, gaze, shift=None):
 	indices = tf.concat([row_ind, col_ind], 1)
 	indices = tf.expand_dims(indices, axis=-1)
 	indices = tf.tile(indices, (1, 1, num_images))
+	
+	xs, ys = warp_func_multi_gaze(indices, tf.cast(original_shape, tf.float32), retina_func, retina_pars, shift, gaze)
+	xs = tf.reshape(tf.transpose(xs), (num_images, input_size, input_size))
+	ys = tf.reshape(tf.transpose(ys), (num_images, input_size, input_size))
 
-	xy_out = warp_func(indices, tf.cast(original_shape, tf.float32), retina_func, retina_pars, shift, gaze)
-	xy_out = tf.reshape(xy_out, (num_images, input_size*input_size, 2))
+	return bilinear_sampler(img, xs, ys)
 
-	#tf.repeat hack for tf2.0 (https://stackoverflow.com/questions/35361467/tensorflow-numpy-repeat-alternative)
-	image_ind = tf.range(num_images)
-	image_ind = tf.reshape(image_ind, [-1, 1])
-	image_ind = tf.tile(image_ind, [1, input_size*input_size])
-	image_ind = tf.reshape(image_ind, [-1])
-	image_ind = image_ind[..., tf.newaxis]
-	image_ind = tf.reshape(image_ind, (num_images, input_size*input_size, 1))
+def bilinear_sampler(img, x, y):
+    """
+    Performs bilinear sampling of the input images according to the
+    normalized coordinates provided by the sampling grid. Note that
+    the sampling is done identically for each channel of the input.
 
-	ixy_out = tf.concat([image_ind, xy_out], axis=2)
+    To test if the function works properly, output image should be
+    identical to input image when theta is initialized to identity
+    transform.
 
-	out = tf.reshape(tf.gather_nd(img, ixy_out), [num_images, output_size, output_size, 3])
+    Input
+    -----
+    - img: batch of images in (B, H, W, C) layout.
+    - grid: x, y which is the output of affine_grid_generator.
 
-	return out
+    Returns
+    -------
+    - out: interpolated images according to grids. Same size as grid.
+    """
+    # grab 4 nearest corner points for each (x_i, y_i)
+    x0 = tf.cast(tf.floor(x), 'int32')
+    x1 = x0 + 1
+    y0 = tf.cast(tf.floor(y), 'int32')
+    y1 = y0 + 1
 
+    # get pixel value at corner coords
+    Ia = transformer.get_pixel_value(img, y0, x0)
+    Ib = transformer.get_pixel_value(img, y1, x0)
+    Ic = transformer.get_pixel_value(img, y0, x1)
+    Id = transformer.get_pixel_value(img, y1, x1)
+
+    # recast as float for delta calculation
+    x0 = tf.cast(x0, 'float32')
+    x1 = tf.cast(x1, 'float32')
+    y0 = tf.cast(y0, 'float32')
+    y1 = tf.cast(y1, 'float32')
+
+    # calculate deltas
+    wa = (x1-x) * (y1-y)
+    wb = (x1-x) * (y-y0)
+    wc = (x-x0) * (y1-y)
+    wd = (x-x0) * (y-y0)
+
+    # add dimension for addition
+    wa = tf.expand_dims(wa, axis=3)
+    wb = tf.expand_dims(wb, axis=3)
+    wc = tf.expand_dims(wc, axis=3)
+    wd = tf.expand_dims(wd, axis=3)
+
+    # compute output
+    out = tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
+
+    return out
 
 ########################################################### DEPRECATED FUNCTIONS ###########################################################
 ############################################################################################################################################

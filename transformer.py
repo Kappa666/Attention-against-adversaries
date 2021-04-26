@@ -221,7 +221,7 @@ def bilinear_sampler(img, x, y):
     ymin = y_bb[:, 0, 0]
     ymax = y_bb[:, 319, 319]
     bounding_box = tf.stack([ymin, xmin, ymax, xmax])
-    center = [x0[:, 160, 160], y0[:, 160, 160]]
+    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
 
     # get pixel value at corner coords
     Ia = get_pixel_value(img, x0, y0)
