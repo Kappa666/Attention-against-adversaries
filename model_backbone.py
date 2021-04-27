@@ -132,6 +132,33 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 
 	return model
 
+class GazeLayer(layers.Layer): # version 1: compute gaze using center of transformed image
+	def __init__(self, input_shape, restricted_theta):
+		super(GazeLayer, self).__init__()
+		self.transformer = transformer.spatial_transformer_network
+		self.shape = input_shape
+		self.restricted = restricted_theta
+
+	def call(self, inputs):
+		return self.transformer(inputs[0], inputs[1], out_dims=[self.shape[0], self.shape[1]], restricted_theta=self.restricted)
+
+class GazeLayer(layers.Layer): # version 2: compute gaze directly using a soft attention model (this is working)
+	def __init__(self, input_shape, num_transformers):
+		super(GazeLayer, self).__init__()
+		self.attn_network = soft_attention_model(input_shape, 2, dummy_attention=False, dummy_scaled_attention=False, num_outputs=num_transformers)
+
+	def call(self, inputs):
+		return tf.transpose(self.attn_network(inputs))
+
+class WarpLayer(layers.Layer):
+	def __init__(self, input_shape):
+		super(WarpLayer, self).__init__()
+		self.warp = glimpse.warp_image_multi_gaze
+		self.shape = input_shape
+
+	def call(self, inputs):
+		return self.warp(inputs[0], output_size=self.shape[0], input_size=self.shape[0], gaze=inputs[1])
+
 def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, restricted_attention=False, num_transformers=5, shared=False):
 	if restricted_attention:
 		num_theta_params = 4
@@ -149,23 +176,22 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 						dummy_scaled_attention=False, num_outputs=num_transformers)
 	theta = attn_network(x)
 
+	# version 2
+	gaze = GazeLayer(base_model_input_shape, num_transformers)(x)
+
 	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 
 	x_transformed = [None]*num_transformers
 	for i in range(num_transformers):
-		theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
-		_, _, gaze_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
-												    out_dims=[base_model_input_shape[0], 
-												     	      base_model_input_shape[1]], 
-											   	    restricted_theta=restricted_attention), 
-				    	     name=f'transformer-{i}')([x, theta_i])
-
-		x_i = layers.Lambda(lambda tensor: glimpse.warp_image_multi_gaze(tensor[0],
-										 output_size=base_model_input_shape[0],
-										 input_size=base_model_input_shape[0],
-										 gaze=tensor[1]),
-				    name=f'nonuniform_sampling-{i}')([x, gaze_i])
+		# version 1
+		# theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
+		# _, _, gaze_i = GazeLayer(base_model_input_shape, restricted_attention)([x, theta_i])
+		
+		# version 2
+		gaze_i = gaze[i*2:(i+1)*2, :]
+		
+		x_i = WarpLayer(base_model_input_shape)([x, gaze_i])
 
 		if not shared:
 			resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
@@ -350,7 +376,6 @@ def resnet_cifar(input_shape=(32,32,3), base_model_input_shape=(24,24,3), name=N
 
 	if input_shape != (32, 32, 3):
 		raise ValueError
-
 	if coarse_fixations:
 		if not coarse_fixations_upsample:
 			if base_model_input_shape != (24, 24, 3):
