@@ -132,7 +132,8 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 
 	return model
 
-class GazeLayer(layers.Layer): # version 1: compute gaze using center of transformed image
+'''
+class GazeLayer(layers.Layer): # compute gaze using center of transformed image
 	def __init__(self, input_shape, restricted_theta):
 		super(GazeLayer, self).__init__()
 		self.transformer = transformer.spatial_transformer_network
@@ -141,8 +142,9 @@ class GazeLayer(layers.Layer): # version 1: compute gaze using center of transfo
 
 	def call(self, inputs):
 		return self.transformer(inputs[0], inputs[1], out_dims=[self.shape[0], self.shape[1]], restricted_theta=self.restricted)
+'''
 
-class GazeLayer(layers.Layer): # version 2: compute gaze directly using a soft attention model (this is working)
+class GazeLayer(layers.Layer):
 	def __init__(self, input_shape, num_transformers):
 		super(GazeLayer, self).__init__()
 		self.attn_network = soft_attention_model(input_shape, 2, dummy_attention=False, dummy_scaled_attention=False, num_outputs=num_transformers)
@@ -172,25 +174,15 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 	else:
 		x = model_input
 
-	attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False,
-						dummy_scaled_attention=False, num_outputs=num_transformers)
-	theta = attn_network(x)
-
-	# version 2
 	gaze = GazeLayer(base_model_input_shape, num_transformers)(x)
+	gaze = gaze * 160
 
 	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 
 	x_transformed = [None]*num_transformers
 	for i in range(num_transformers):
-		# version 1
-		# theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
-		# _, _, gaze_i = GazeLayer(base_model_input_shape, restricted_attention)([x, theta_i])
-		
-		# version 2
-		gaze_i = gaze[i*2:(i+1)*2, :]
-		
+		gaze_i = gaze[i*2:(i+1)*2, :]		
 		x_i = WarpLayer(base_model_input_shape)([x, gaze_i])
 
 		if not shared:
