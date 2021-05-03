@@ -18,7 +18,6 @@ from tqdm import tqdm
 from tfdeterminism import patch
 patch()
 
-
 #input args
 parser = argparse.ArgumentParser()
 
@@ -373,33 +372,6 @@ elif dataset == 'cluttered_mnist':
 else:
 	raise ValueError
 
-#save some transformed images
-if model_tag == 'parallel_transformers' and dataset == 'imagenet10' and save_images:
-	colors = tf.constant([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0]])
-
-	img_ind = 0
-	for x_test, _ in test_dataset:
-		boxes = []
-		img = tf.reshape(x_test[0], [1, 320, 320, 3])
-
-		for i in range(num_transformers):
-			transformer = tf.keras.Model(model.inputs, model.get_layer(f'transformer-{i}').output)
-			img_new, box, center = transformer(img)
-
-			img_new = tf.reshape(img_new, [320, 320, 3])
-			tf.keras.preprocessing.image.save_img('{}/images/test-{}-{}.png'.format(FILE_PATH, img_ind, i), img_new)
-
-			minx, maxx = min(box[1][0], box[3][0]).numpy(), max(box[1][0], box[3][0]).numpy()
-			miny, maxy = min(box[0][0], box[2][0]).numpy(), max(box[0][0], box[2][0]).numpy()
-			boxes.append([miny, minx, maxy, maxx])
-
-		boxes = tf.reshape(tf.constant(boxes), (1, num_transformers, 4))
-		img = tf.image.draw_bounding_boxes(img, boxes, colors)
-		img = tf.reshape(img, [320, 320, 3])
-		tf.keras.preprocessing.image.save_img('{}/images/test-{}.png'.format(FILE_PATH, img_ind), img)
-
-		img_ind += batch_size
-
 #run adversary evaluations
 if evaluate_mode == 'robustness':
 	#evaluate adversarial robustness
@@ -445,7 +417,7 @@ if evaluate_mode == 'robustness':
 			wrapped_dataset = [(x_test, y_test)]
 			silent = False
 		else:
-			silent = True
+			silent = False
 			wrapped_dataset = tqdm(test_dataset)
 
 		num_adv_examples = 0
