@@ -547,9 +547,13 @@ def warp_image_multi_gaze(img, output_size, input_size, gaze, shift=None):
 		gaze_x = tf.random.uniform(shape=[], minval=-gaze, maxval=gaze, dtype=tf.int32)
 		gaze_y = tf.random.uniform(shape=[], minval=-gaze, maxval=gaze, dtype=tf.int32)
 		gaze = tf.cast([[gaze_x, gaze_y]], tf.float32)
+		gaze = tf.expand_dims(gaze, axis=-1)
+		gaze = tf.tile(gaze, (1, 1, num_images))
 	elif isinstance(gaze, list):
 		assert(len(gaze) == 2)
 		gaze = tf.cast([gaze], tf.float32)
+		gaze = tf.expand_dims(gaze, axis=-1)
+		gaze = tf.tile(gaze, (1, 1, num_images))
 	elif tf.is_tensor(gaze):
 		gaze = tf.cast([gaze], tf.float32)
 	else:
