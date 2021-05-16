@@ -179,7 +179,7 @@ elif evaluate_mode == 'nonrobust_features':
 	if os.path.exists(adv_save_file):
 		raise ValueError
 
-if model == 'resnet' or model == 'resnet_cifar' or model == 'parallel_transformers':
+if model == 'resnet' or model == 'resnet_cifar' or model == 'parallel_transformers' or model == 'multi_gaze':
 	if sampling or coarse_fixations or cifar_ecnn:
 		stochastic_model = True
 	else:
@@ -334,6 +334,17 @@ elif model == 'parallel_transformers':
                 model.load_weights(save_file, by_name=False)
 	else:
              	raise NotImplementedError
+
+elif model == 'multi_gaze':
+
+        def build_model():
+                return model_backbone.multi_gaze(num_classes=num_classes, augment=augment, num_gazes=num_transformers, shared=shared)
+
+        if not stochastic_model:
+                model = build_model()
+                model.load_weights(save_file, by_name=False)
+        else:
+                raise NotImplementedError
  
 else:
 	raise ValueError

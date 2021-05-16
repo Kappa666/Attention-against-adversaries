@@ -132,22 +132,56 @@ def resnet(input_shape=(320,320,3), base_model_input_shape=(224,224,3), name='CN
 
 	return model
 
-'''
-class GazeLayer(layers.Layer): # compute gaze using center of transformed image
-	def __init__(self, input_shape, restricted_theta):
-		super(GazeLayer, self).__init__()
-		self.transformer = transformer.spatial_transformer_network
-		self.shape = input_shape
-		self.restricted = restricted_theta
+def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, restricted_attention=False, num_transformers=5, shared=False):
+	if restricted_attention:
+		num_theta_params = 4
+	else:
+		num_theta_params = 6
 
-	def call(self, inputs):
-		return self.transformer(inputs[0], inputs[1], out_dims=[self.shape[0], self.shape[1]], restricted_theta=self.restricted)
-'''
+	model_input = layers.Input(shape=base_model_input_shape)
+	
+	if augment:
+		x = layers.Lambda(lambda tensor: glimpse.image_augmentation(tensor, dataset='imagenet10'), name='image_augmentation')(model_input)
+	else:
+		x = model_input
+	
+	attn_network = soft_attention_model((base_model_input_shape), num_theta_params, dummy_attention=False,
+					    dummy_scaled_attention=False, num_outputs=num_transformers)
+	theta = attn_network(x)
+	
+	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
+	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
+
+	x_transformed = [None]*num_transformers
+	for i in range(num_transformers):
+		theta_i = theta[:, i*num_theta_params:(i+1)*num_theta_params]
+		x_i = layers.Lambda(lambda tensor: transformer.spatial_transformer_network(tensor[0], tensor[1], 
+											   out_dims=[base_model_input_shape[0], 
+												     base_model_input_shape[1]], 
+											   restricted_theta=restricted_attention), 
+				    name=f'transformer-{i}')([x, theta_i])[0]
+
+		if not shared:
+			resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
+			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
+
+		x_transformed[i] = resnet_model(x_i)
+	x = layers.concatenate(x_transformed) if num_transformers > 1 else x_transformed[0]
+
+	if not return_logits:
+		model_output = layers.Dense(num_classes, activation='softmax', kernel_initializer='he_normal')(x)
+	else:
+		model_output = layers.Dense(num_classes, kernel_initializer='he_normal')(x)
+
+	model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
+	return model
 
 class GazeLayer(layers.Layer):
-	def __init__(self, input_shape, num_transformers):
+	def __init__(self, input_shape, num_gazes):
 		super(GazeLayer, self).__init__()
-		self.attn_network = soft_attention_model(input_shape, 2, dummy_attention=False, dummy_scaled_attention=False, num_outputs=num_transformers)
+		self.attn_network = soft_attention_model(input_shape, 2, dummy_attention=False,
+							 dummy_scaled_attention=False, num_outputs=num_gazes,
+							 full_resnet=True, initialize_fixations=True)
 
 	def call(self, inputs):
 		return tf.transpose(self.attn_network(inputs))
@@ -161,12 +195,7 @@ class WarpLayer(layers.Layer):
 	def call(self, inputs):
 		return self.warp(inputs[0], output_size=self.shape[0], input_size=self.shape[0], gaze=inputs[1])
 
-def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, restricted_attention=False, num_transformers=5, shared=False):
-	if restricted_attention:
-		num_theta_params = 4
-	else:
-		num_theta_params = 6
-
+def multi_gaze(base_model_input_shape=(320,320,3), num_classes=10, return_logits=False, augment=False, num_gazes=5, shared=False):
 	model_input = layers.Input(shape=base_model_input_shape)
 	
 	if augment:
@@ -174,14 +203,14 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 	else:
 		x = model_input
 
-	gaze = GazeLayer(base_model_input_shape, num_transformers)(x)
+	gaze = GazeLayer(base_model_input_shape, num_gazes)(x)
 	gaze = gaze * 160
 
 	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 
-	x_transformed = [None]*num_transformers
-	for i in range(num_transformers):
+	x_transformed = [None]*num_gazes
+	for i in range(num_gazes):
 		gaze_i = gaze[i*2:(i+1)*2, :]		
 		x_i = WarpLayer(base_model_input_shape)([x, gaze_i])
 
@@ -190,7 +219,7 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 			resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
 
 		x_transformed[i] = resnet_model(x_i)
-	x = layers.concatenate(x_transformed)
+	x = layers.concatenate(x_transformed) if num_gazes > 1 else x_transformed[0]
 
 	if not return_logits:
 		model_output = layers.Dense(num_classes, activation='softmax', kernel_initializer='he_normal')(x)
@@ -198,7 +227,6 @@ def parallel_transformers(base_model_input_shape=(320,320,3), num_classes=10, re
 		model_output = layers.Dense(num_classes, kernel_initializer='he_normal')(x)
 
 	model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
-	
 	return model
     
 def ecnn(input_shape=(320,320,3), base_model_input_shape=(40,40,3), name='ECNN', num_classes=10, augment=False, auxiliary=False, sampling=True, scales='all', pooling=None, dropout=False, gaze=None, scale4_freeze=False, return_logits=False):
@@ -597,26 +625,19 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 
 	return model
 
-def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention, num_outputs=1):
+def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention, num_outputs=1, full_resnet=False, initialize_fixations=False):
 	#build attention network
 	
 	assert(type(input_shape) == tuple)
 	if num_coords != 6 and num_coords != 4 and num_coords != 2:
 		raise NotImplementedError
 
-	resnet_model = resnet(base_model_input_shape=input_shape, augment=False, coarse_fixations=False)
-	attention_network = tf.keras.models.Sequential(resnet_model.layers[:-1])
-
-	# attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
-
-	# attn_in = layers.Input(shape=input_shape)
-
-	# attn_x = layers.Flatten()(attn_in)
-	# attn_x = layers.Dense(50, activation='tanh')(attn_x)
-	# attn_out = layers.Dropout(0.2)(attn_x)
-
-	# attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
-
+	if full_resnet:
+		resnet_model = resnet(base_model_input_shape=input_shape, augment=False, coarse_fixations=False)
+		attention_network = tf.keras.models.Sequential(resnet_model.layers[:-1])
+	else:
+		attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
+	
 	model_input = layers.Input(shape=input_shape)
 	x = attention_network(model_input)
 
@@ -628,10 +649,13 @@ def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_
 	elif num_coords == 4:
 		bias_init = [1., 0., 1., 0.]
 	elif num_coords == 2:
-		bias_init = [0., 0.]
-    	
+		bias_init = [0., 0.]    	
+
 	bias_init = [val for _ in range(num_outputs) for val in bias_init]
 	
+	if initialize_fixations:
+		bias_init = [0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.0, 0.0]
+
 	model_output = layers.Dense(num_coords * num_outputs, activation='tanh', kernel_initializer=tf.zeros_initializer(), bias_initializer=tf.constant_initializer(bias_init))(x)
 
 	attn_model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
