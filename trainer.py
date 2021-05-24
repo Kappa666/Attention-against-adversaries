@@ -6,6 +6,7 @@ import glimpse
 import warnings
 import argparse
 import datasets
+from datasets import FILE_PATH
 import model_backbone
 import attack_backbone
 
@@ -14,6 +15,7 @@ import tensorflow as tf
 
 from functools import partial
 from datasets import _preprocess_y
+from math import ceil
 
 #input args
 parser = argparse.ArgumentParser()
@@ -42,6 +44,10 @@ parser.add_argument('--mnist_dummy_scaled_attention', default=0)
 parser.add_argument('--mnist_restricted_attention', default=0)
 parser.add_argument('--mnist_retinal_attention', default=0)
 parser.add_argument('--adv_train', default=0)
+parser.add_argument('--epochs', default=100)
+parser.add_argument('--shared', default=0)
+parser.add_argument('--num_transformers', default=5)
+parser.add_argument('--restricted_attention', default=0)
 
 parser.add_argument('--only_evaluate', default=0)
 args = vars(parser.parse_args())
@@ -69,6 +75,10 @@ mnist_dummy_scaled_attention = bool(int(args['mnist_dummy_scaled_attention']))
 mnist_restricted_attention = bool(int(args['mnist_restricted_attention']))
 mnist_retinal_attention = bool(int(args['mnist_retinal_attention']))
 adv_train = bool(int(args['adv_train']))
+epochs = int(args['epochs'])
+shared = bool(int(args['shared']))
+num_transformers = int(args['num_transformers'])
+restricted_attention = bool(int(args['restricted_attention']))
 
 pooling = None if pooling == 'None' else pooling 
 scales = 'scale4' if single_scale else 'all'
@@ -76,7 +86,7 @@ scales = 'scale4' if single_scale else 'all'
 if dataset == 'test10':
 	warnings.warn('running in test mode!')
 
-save_file = 'model_checkpoints/{}.h5'.format(name)
+save_file = '{}/model_checkpoints/{}.h5'.format(FILE_PATH, name)
 
 if only_evaluate:
 	if not os.path.exists(save_file):
@@ -84,6 +94,8 @@ if only_evaluate:
 else:
 	if os.path.exists(save_file):
 		raise ValueError
+
+print(save_file)
 
 distribution = tf.distribute.MirroredStrategy()
 
@@ -96,7 +108,9 @@ elif dataset == 'imagenet':
 else:
 	raise ValueError
 
-with distribution.scope():	
+with distribution.scope():      
+	
+	print('Building network...')
 
 	model_tag = model
 	#build network
@@ -128,7 +142,7 @@ with distribution.scope():
 
 		if single_scale:
 			assert(cifar_ecnn)
-        
+	
 		if adv_train:
 			return_logits=True
 		else:
@@ -150,7 +164,7 @@ with distribution.scope():
 			assert(not dropout)
 		else:
 			adv_training=False
-            
+	    
 		model = model_backbone.resnet_cifar(base_model_input_shape=base_model_input_shape, augment=augment, sampling=sampling, coarse_fixations=coarse_fixations, coarse_fixations_upsample=upsample_fixations, coarse_fixations_gaussianblur=blur_fixations, approx_ecnn=cifar_ecnn, return_logits=return_logits, build_feedback=cifar_feedback, ecnn_pooling=pooling, ecnn_dropout=dropout, ecnn_single_scale=single_scale, adv_training=adv_training, wider_network=adv_train)
 		if only_evaluate:
 			#convention for resnet_cifar is to not use the name
@@ -171,7 +185,7 @@ with distribution.scope():
 		if adv_train:
 			return_logits=True
 		else:
-			return_logits=False		
+			return_logits=False	     
 
 		model = model_backbone.attention_mnist(augment=augment, return_logits=return_logits, attention=mnist_attention, dummy_attention=mnist_dummy_attention, dummy_scaled_attention=mnist_dummy_scaled_attention, restricted_attention=mnist_restricted_attention, retinal_attention=mnist_retinal_attention)
 		if only_evaluate:
@@ -189,28 +203,43 @@ with distribution.scope():
 		model = model_backbone.ecnn(num_classes=num_classes, augment=augment, auxiliary=auxiliary, sampling=sampling, scales=scales, pooling=pooling, dropout=dropout, scale4_freeze=scale4_freeze)
 		if only_evaluate:
 			model.load_weights(save_file, by_name=True)
-			
+
+	elif model == 'parallel_transformers':
+		model = model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, restricted_attention=restricted_attention, shared=shared, num_transformers=num_transformers)
+		if only_evaluate:
+			model.load_weights(save_file, by_name=False)		    
+	elif model == 'multi_gaze':
+                model = model_backbone.multi_gaze(num_classes=num_classes, augment=augment, shared=shared, num_gazes=num_transformers)
+                if only_evaluate:
+                        model.load_weights(save_file, by_name=False)
 	else:
 		raise ValueError
 
 	model.summary()
+	t1 = time.time()
+	print('Loading dataset...')
+
+	scale = 1.
 
 	#load dataset, set defaults
 	if dataset == 'imagenet10' or dataset == 'bbox_imagenet10':
-		epochs=400
+		train_dataset_size = 5659
+		test_dataset_size = 500
+		#epochs=400
 		base_lr=1e-3
-		batch_size=1
+		batch_size=32
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
+		steps_per_epoch = ceil(train_dataset_size / batch_size)
+		validation_steps = ceil(test_dataset_size / batch_size)
 
 		if dataset == 'imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=False, batch_size=batch_size)
+			train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 		elif dataset == 'bbox_imagenet10':
-			x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True, batch_size=batch_size)
+			train_dataset, test_dataset = datasets.load_imagenet10(only_test=only_evaluate, only_bbox=True, aux_labels=auxiliary, batch_size=batch_size)
 
 		def lr_schedule(epoch, lr, base_lr):
 			#keeps learning rate to a schedule
-
 			if epoch > 360:
 				lr = base_lr * 0.5e-3
 			elif epoch > 320:
@@ -219,25 +248,27 @@ with distribution.scope():
 				lr = base_lr * 1e-2
 			elif epoch > 160:
 				lr = base_lr * 1e-1
-
-			return lr
+			
+			return lr / scale
 	elif dataset == 'imagenet100' or dataset == 'imagenet':
+		train_dataset_size = 1281167
+		test_dataset_size = 50000
 		base_lr=1e-1
 		batch_size=256
 		checkpoint_interval=999
 		optimizer = tf.keras.optimizers.SGD(learning_rate=base_lr, decay=1e-4, momentum=0.9)
 
 		if dataset == 'imagenet100':
-			steps_per_epoch = 502
-			validation_steps = 20
+			steps_per_epoch = ceil(train_dataset_size / 10 / batch_size)
+			validation_steps = ceil(test_dataset_size / 10 / batch_size)
 		else:
-			steps_per_epoch = 5005
-			validation_steps = 196
+			steps_per_epoch = ceil(train_dataset_size / batch_size)
+			validation_steps = ceil(test_dataset_size / batch_size)
 
 		train_dataset, test_dataset = datasets.load_imagenet(data_dir=dataset, only_test=only_evaluate, aux_labels=auxiliary, batch_size=batch_size)
 
-		if dataset == 'imagenet100':        
-			epochs = 130
+		if dataset == 'imagenet100':	
+			#epochs = 130
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
 
@@ -250,9 +281,9 @@ with distribution.scope():
 				elif epoch > 30:
 					lr = base_lr * 1e-1
 
-				return lr
-		else:        
-			epochs = 90
+				return lr / scale
+		else:	
+			#epochs = 90
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
 				if epoch > 80:
@@ -262,17 +293,17 @@ with distribution.scope():
 				elif epoch > 30:
 					lr = base_lr * 1e-1
 
-				return lr
+				return lr / scale
 	elif dataset == 'cifar10' or dataset == 'integer_cifar10':
 		checkpoint_interval=999
 
 		if not adv_train:
-			epochs=200
+			#epochs=200
 			base_lr=1e-3
 			batch_size=128
 			optimizer = tf.keras.optimizers.Adam(learning_rate=base_lr)
 		else:
-			epochs=165
+			#epochs=165
 			base_lr=0.1
 			batch_size=64
 			optimizer=tf.keras.optimizers.SGD(learning_rate=base_lr, decay=1e-4, momentum=0.9)
@@ -285,29 +316,28 @@ with distribution.scope():
 		if not adv_train:
 			def lr_schedule(epoch, lr, base_lr):
 				#keeps learning rate to a schedule
-
-			    if epoch > 180:
-			        lr = base_lr * 0.5e-3
-			    elif epoch > 160:
-			        lr = base_lr * 1e-3
-			    elif epoch > 120:
-			        lr = base_lr * 1e-2
-			    elif epoch > 80:
-			        lr = base_lr * 1e-1
-
-			    return lr
+				if epoch > 180:
+					lr = base_lr * 0.5e-3
+				elif epoch > 160:
+					lr = base_lr * 1e-3
+				elif epoch > 120:
+					lr = base_lr * 1e-2
+				elif epoch > 80:
+					lr = base_lr * 1e-1
+					
+				return lr / scale
 		else:
-                        def lr_schedule(epoch, lr, base_lr):
-                                #keeps learning rate to a schedule
+			def lr_schedule(epoch, lr, base_lr):
+				#keeps learning rate to a schedule
 
-                            if epoch > 125:
-                                lr = base_lr * 1e-2
-                            elif epoch > 85:
-                                lr = base_lr * 1e-1
+				if epoch > 125:
+					lr = base_lr * 1e-2
+				elif epoch > 85:
+					lr = base_lr * 1e-1
 
-                            return lr
+				return lr
 	elif dataset == 'cluttered_mnist':
-		epochs=100
+		#epochs=100
 		base_lr=1e-3
 		batch_size=128
 		checkpoint_interval=999
@@ -318,18 +348,18 @@ with distribution.scope():
 		def lr_schedule(epoch, lr, base_lr):
 			#keeps learning rate to a schedule
 
-		    if epoch > 90:
-		        lr = base_lr * 0.5e-3
-		    elif epoch > 80:
-		        lr = base_lr * 1e-3
-		    elif epoch > 60:
-		        lr = base_lr * 1e-2
-		    elif epoch > 40:
-		        lr = base_lr * 1e-1
-
-		    return lr
+			if epoch > 90:
+				lr = base_lr * 0.5e-3
+			elif epoch > 80:
+				lr = base_lr * 1e-3
+			elif epoch > 60:
+				lr = base_lr * 1e-2
+			elif epoch > 40:
+				lr = base_lr * 1e-1
+				
+			return lr / scale
 	elif dataset == 'test10':
-		epochs=3
+		#epochs=3
 		base_lr=1e-6
 		batch_size=2
 		checkpoint_interval=2
@@ -342,13 +372,17 @@ with distribution.scope():
 			return lr
 	else:
 		raise ValueError
+	t2 = time.time()
+	print('Time to load:', t2 - t1)
+	print('Training model...')
+	t1 = time.time()
 
 	if adv_train:
 		loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
 	else:
 		loss = 'categorical_crossentropy'
 
-	if only_evaluate:				
+	if only_evaluate:			       
 		model.compile(loss=loss, optimizer=tf.keras.optimizers.Adam(learning_rate=0.), metrics=['accuracy'])
 	else:
 		lr_schedule_filled = partial(lr_schedule, base_lr=base_lr)
@@ -358,11 +392,11 @@ with distribution.scope():
 		lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule_filled, verbose=1)
 		#lr_reducer = tf.keras.callbacks.ReduceLROnPlateau(factor=np.sqrt(0.1), cooldown=0, patience=5, min_lr=0.5e-6)
 		oldest_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath=save_file, save_best_only=False, save_weights_only=True, verbose=1)
-		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='model_checkpoints/{}-'.format(name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
+		#interval_model_saver = tf.keras.callbacks.ModelCheckpoint(filepath='{}/model_checkpoints/{}-'.format(FILE_PATH, name)+'{epoch:03d}.h5', period=checkpoint_interval, save_best_only=False, save_weights_only=True, verbose=1)
 
 		callbacks = [lr_scheduler, oldest_model_saver]
 
-		if dataset == 'imagenet100' or dataset =='imagenet':
+		if dataset == 'imagenet100' or dataset =='imagenet' or dataset == 'imagenet10':
 			#stream from tfrecords
 			#note: does not exactly partition train/test epochs
 
@@ -389,7 +423,7 @@ with distribution.scope():
 
 				@tf.function
 				def train_model_on_batch(x, y):
-					return distribution.experimental_run_v2(model.train_on_batch, args=(x, y), kwargs={'reset_metrics': False})								
+					return distribution.experimental_run_v2(model.train_on_batch, args=(x, y), kwargs={'reset_metrics': False})							     
 
 				#allowed sets for mechanism gaze
 				if model_tag == 'resnet_cifar':
@@ -399,12 +433,12 @@ with distribution.scope():
 						else:
 							gaze_val = 4
 					elif sampling:
-						gaze_val = 8                   
+						gaze_val = 8		   
 					elif cifar_ecnn:
 						gaze_val = 4   
 					else:
-						gaze_val = 0             
-                
+						gaze_val = 0	     
+		
 				#for each epoch
 				for epoch_i in range(epochs):
 					#shuffle
@@ -429,7 +463,7 @@ with distribution.scope():
 						x_batch_augmented = glimpse.image_augmentation(x_batch, dataset).numpy()
 
 						#choose a point of fixation
-						if model_tag == 'resnet_cifar':                        
+						if model_tag == 'resnet_cifar':			
 							if gaze_val == 0:
 								#dummy val for no gaze
 								gaze_x = 999
@@ -440,12 +474,12 @@ with distribution.scope():
 							gaze = [gaze_x, gaze_y]
 						else:
 							gaze = None
-                            
+			    
 						#get adv examples
 						x_batch_adv = distribution.experimental_run_v2(attack_backbone.perturb, args=(x_batch_augmented,y_batch), kwargs={'model': model, 'gaze': gaze})
 
 						#train on adv examples
-						if gaze is None:                        
+						if gaze is None:			
 							metrics = train_model_on_batch(x_batch_adv, y_batch)
 						else:
 							metrics = train_model_on_batch([ x_batch_adv, np.tile([gaze], (len(x_batch_adv),1)) ], y_batch)
@@ -453,7 +487,7 @@ with distribution.scope():
 						batch_end = time.time()
 						print('epoch {} batch {}/{} took {:3f}s. with gaze {}: loss {}, acc {}'.format(epoch_i, batch_i, num_batches, batch_end - batch_start, gaze, metrics[0], metrics[1]))
 
-					if gaze is None:                                  
+					if gaze is None:				  
 						metrics = model.evaluate(x_test, y_test, batch_size=batch_size, verbose=0)
 					else:
 						print('validation gaze: {}'.format(gaze))
@@ -478,17 +512,19 @@ with distribution.scope():
 	#evaluate model
 	#repeats by default (sanity check for model stochasticity)
 	repeats = 3
+	t2 = time.time()
+	print("Time to train:", t2 - t1)
 
 	for _ in range(repeats):
 
-		if dataset == 'imagenet100' or dataset == 'imagenet':
+		if dataset == 'imagenet100' or dataset == 'imagenet' or dataset=='imagenet10':
 			scores = model.evaluate(test_dataset, steps=validation_steps, verbose=0)
 		else:
 			if (not only_evaluate) and adv_train and model_tag == 'resnet_cifar':
-				assert(not auxiliary)                
+				assert(not auxiliary)		
 				scores = model.evaluate([ x_test, np.tile([[0,0]], (len(x_test),1)) ], y_test, verbose=0)
 			else:
-				if not auxiliary:	
+				if not auxiliary:       
 					scores = model.evaluate(x_test, y_test, verbose=0)
 				else:
 					scores = model.evaluate(x_test, [y_test, y_test, y_test, y_test, y_test], verbose=0)

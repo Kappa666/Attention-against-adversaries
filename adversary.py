@@ -5,6 +5,7 @@ import pickle
 import warnings
 import argparse
 import datasets
+from datasets import FILE_PATH
 import model_backbone
 import attack_backbone
 
@@ -16,7 +17,6 @@ from tqdm import tqdm
 #patch for deterministic tensorflow ops on tf20
 from tfdeterminism import patch
 patch()
-
 
 #input args
 parser = argparse.ArgumentParser()
@@ -63,6 +63,12 @@ parser.add_argument('--build_orthogonal_features', default=0)
 parser.add_argument('--staggered_build', default=0)
 parser.add_argument('--staggered_build_code', default=0)
 
+#transformer options
+parser.add_argument('--num_transformers', default=5)
+parser.add_argument('--save_images', default=0)
+parser.add_argument('--shared', default=0)
+parser.add_argument('--restricted_attention', default=0)
+
 args = vars(parser.parse_args())
 
 name = str(args['name'])
@@ -105,7 +111,12 @@ build_orthogonal_features = bool(int(args['build_orthogonal_features']))
 staggered_build = bool(int(args['staggered_build']))
 staggered_build_code = int(args['staggered_build_code'])
 
-save_file = '/om5/user/kappa666/maya/model_checkpoints/{}.h5'.format(name)
+num_transformers = int(args['num_transformers'])
+save_images = bool(int(args['save_images']))
+shared = bool(int(args['shared']))
+restricted_attention = bool(int(args['restricted_attention']))
+
+save_file = '{}/model_checkpoints/{}.h5'.format(FILE_PATH, name)
 print(save_file)
 
 if dataset == 'imagenet':
@@ -160,15 +171,15 @@ elif evaluate_mode == 'nonrobust_features':
 	features_tag = 'multifeature_' if build_orthogonal_features else ''
 	if not attack_criteria_det:
 		random_relabel = True
-		adv_save_file = '/om5/user/kappa666/maya/model_checkpoints/model_nonrobust_rand_{}{}.h5'.format(features_tag, name)
+		adv_save_file = '{}/model_checkpoints/model_nonrobust_rand_{}{}.h5'.format(FILE_PATH, features_tag, name)
 	else:
 		random_relabel = False
-		adv_save_file = '/om5/user/kappa666/maya/model_checkpoints/model_nonrobust_norand_{}{}.h5'.format(features_tag, name)
+		adv_save_file = '{}/model_checkpoints/model_nonrobust_norand_{}{}.h5'.format(FILE_PATH, features_tag, name)
 
 	if os.path.exists(adv_save_file):
 		raise ValueError
 
-if model == 'resnet' or model == 'resnet_cifar':
+if model == 'resnet' or model == 'resnet_cifar' or model == 'parallel_transformers' or model == 'multi_gaze':
 	if sampling or coarse_fixations or cifar_ecnn:
 		stochastic_model = True
 	else:
@@ -313,6 +324,28 @@ elif model == 'ecnn':
 	else:
 		model = attack_backbone.build_ensemble(build_model=build_model, save_file=save_file, ensemble_size=ensemble_size, input_size=(320, 320, 3), random_gaze=random_gaze, gaze_val=gaze_val, load_by_name=True)
 
+elif model == 'parallel_transformers':
+	
+	def build_model():
+		return model_backbone.parallel_transformers(num_classes=num_classes, augment=augment, num_transformers=num_transformers, shared=shared, restricted_attention = restricted_attention)
+
+	if not stochastic_model:
+                model = build_model()
+                model.load_weights(save_file, by_name=False)
+	else:
+             	raise NotImplementedError
+
+elif model == 'multi_gaze':
+
+        def build_model():
+                return model_backbone.multi_gaze(num_classes=num_classes, augment=augment, num_gazes=num_transformers, shared=shared)
+
+        if not stochastic_model:
+                model = build_model()
+                model.load_weights(save_file, by_name=False)
+        else:
+                raise NotImplementedError
+ 
 else:
 	raise ValueError
 
@@ -320,7 +353,8 @@ model.summary()
 
 #load datasets
 if dataset == 'imagenet10':
-	x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=True, only_bbox=False)
+	batch_size = 32
+	train_dataset, test_dataset = datasets.load_imagenet(data_dir='imagenet10', only_test=True, batch_size=batch_size)
 	num_test_samples = 500
 elif dataset == 'bbox_imagenet10':
 	x_train, y_train, x_test, y_test = datasets.load_imagenet10(only_test=True, only_bbox=True)
@@ -374,27 +408,27 @@ if evaluate_mode == 'robustness':
 	attack_random_init_tag = 'randinit' if attack_random_init else 'nonrandinit'
 	random_gaze_tag = 'randomgaze' if random_gaze else 'nonrandomgaze'
 	subsampled_tag = '_subsampled' if subsample_dataset else ''
-	robustness_packet_loc = '/om5/user/kappa666/maya/cluster_runs/adversary/{}_{}_{}-{}-{}-{}-{}-{}-{}-{}.packet'.format(evaluate_mode, name+subsampled_tag, attack_algo, attack_distance_metric, attack_iterations, attack_step_size, attack_criteria_targeted_tag, attack_criteria_det_tag, attack_random_init_tag, random_gaze_tag)
+	robustness_packet_loc = '{}/cluster_runs/adversary/{}_{}_{}-{}-{}-{}-{}-{}-{}-{}.packet'.format(FILE_PATH, evaluate_mode, name+subsampled_tag, attack_algo, attack_distance_metric, attack_iterations, attack_step_size, attack_criteria_targeted_tag, attack_criteria_det_tag, attack_random_init_tag, random_gaze_tag)
 
-	if os.path.exists(robustness_packet_loc):
-		raise ValueError
+	# if os.path.exists(robustness_packet_loc):
+		# raise ValueError
 
 	print('scanning epsilons: {}'.format(epsilons))
 
-	if dataset != 'imagenet100' and dataset != 'imagenet':
+	if dataset != 'imagenet10' and dataset != 'imagenet100' and dataset != 'imagenet':
 		x_test_backup = x_test.copy()
 		y_test_backup = y_test.copy()
 
 	for e in epsilons:
 
-		if dataset != 'imagenet100' and dataset != 'imagenet':
+		if dataset != 'imagenet10' and dataset != 'imagenet100' and dataset != 'imagenet':
 			#refresh copy of test images
 			x_test = x_test_backup.copy()
 			y_test = y_test_backup.copy()		
 			wrapped_dataset = [(x_test, y_test)]
 			silent = False
 		else:
-			silent = True
+			silent = False
 			wrapped_dataset = tqdm(test_dataset)
 
 		num_adv_examples = 0

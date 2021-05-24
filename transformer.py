@@ -45,7 +45,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
     B = tf.shape(input_fmap)[0]
     H = tf.shape(input_fmap)[1]
     W = tf.shape(input_fmap)[2]
-        
+    
     # reshape theta to (B, 2, 3)
     if restricted_theta:
         theta_full = tf.unstack(tf.zeros(shape=(B, 6)), axis=1)
@@ -56,6 +56,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
         theta_full[5] = theta[:,3]
         
         theta = tf.stack(theta_full, axis=1)
+    
     theta = tf.reshape(theta, [B, 2, 3])
 
     # generate grids of same size or upsample/downsample if specified
@@ -70,9 +71,7 @@ def spatial_transformer_network(input_fmap, theta, out_dims=None, restricted_the
     y_s = batch_grids[:, 1, :, :]
 
     # sample input with grid to get output
-    out_fmap = bilinear_sampler(input_fmap, x_s, y_s)
-
-    return out_fmap
+    return bilinear_sampler(input_fmap, x_s, y_s)
 
 
 def get_pixel_value(img, x, y):
@@ -196,8 +195,12 @@ def bilinear_sampler(img, x, y):
     # rescale x and y to [0, W-1/H-1]
     x = tf.cast(x, 'float32')
     y = tf.cast(y, 'float32')
-    x = 0.5 * ((x + 1.0) * tf.cast(max_x-1, 'float32'))
-    y = 0.5 * ((y + 1.0) * tf.cast(max_y-1, 'float32'))
+    
+    x = 0.5 * (x + 1.0)
+    y = 0.5 * (y + 1.0)
+
+    x = x * tf.cast(max_x-1, 'float32')
+    y = y * tf.cast(max_y-1, 'float32')
 
     # grab 4 nearest corner points for each (x_i, y_i)
     x0 = tf.cast(tf.floor(x), 'int32')
@@ -210,6 +213,15 @@ def bilinear_sampler(img, x, y):
     x1 = tf.clip_by_value(x1, zero, max_x)
     y0 = tf.clip_by_value(y0, zero, max_y)
     y1 = tf.clip_by_value(y1, zero, max_y)
+
+    x_bb = tf.cast(x0, 'float32') / tf.cast(max_x-1, 'float32')
+    y_bb = tf.cast(y0, 'float32') / tf.cast(max_y-1, 'float32')
+    xmin = x_bb[:, 0, 0]
+    xmax = x_bb[:, 319, 319]
+    ymin = y_bb[:, 0, 0]
+    ymax = y_bb[:, 319, 319]
+    bounding_box = tf.stack([ymin, xmin, ymax, xmax])
+    center = tf.stack([x0[:, 160, 160], y0[:, 160, 160]])
 
     # get pixel value at corner coords
     Ia = get_pixel_value(img, x0, y0)
@@ -238,4 +250,4 @@ def bilinear_sampler(img, x, y):
     # compute output
     out = tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
 
-    return out
+    return out, bounding_box, center

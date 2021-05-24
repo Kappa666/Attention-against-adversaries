@@ -14,12 +14,14 @@ from PIL import Image
 from tqdm import tqdm
 from functools import partial
 
+FILE_PATH = '/om5/user/kappa666/Attention-against-adversaries'
+
 def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, batch_size=256, subsample=False):
 	# imagenet datasets (100 randomly pre-selected classes or full)
 
-	if data_dir != 'imagenet100' and data_dir != 'imagenet':
+	if data_dir != 'imagenet100' and data_dir != 'imagenet' and data_dir != 'imagenet10':
 		raise ValueError
-
+	
 	if subsample:
 		if not only_test:
 			raise NotImplementedError
@@ -29,11 +31,14 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 
 	shortlist = None
 	if data_dir == 'imagenet100':
-		shortlist_loc = '/om5/user/kappa666/maya/imagenet100/shortlist.pickle'
+		shortlist_loc = '{}/imagenet100/shortlist.pickle'.format(FILE_PATH)
+		shortlist = pickle.load(open(shortlist_loc, 'rb'))
+	if data_dir == 'imagenet10':
+		shortlist_loc = '{}/imagenet10/shortlist.pickle'.format(FILE_PATH)
 		shortlist = pickle.load(open(shortlist_loc, 'rb'))
 
-	train_cache_pattern = '/om5/user/kappa666/maya/{}/train-*'.format(data_dir)
-	test_cache_pattern = '/om5/user/kappa666/maya/{}/test-*'.format(data_dir)
+	train_cache_pattern = '{}/{}/train-*'.format(FILE_PATH, data_dir)
+	test_cache_pattern = '{}/{}/test-*'.format(FILE_PATH, data_dir)
 
 	#if cache does not exist, build
 	if not (glob.glob(train_cache_pattern) or glob.glob(test_cache_pattern)):
@@ -75,13 +80,13 @@ def load_imagenet(data_dir='imagenet100', only_test=False, aux_labels=False, bat
 def _build_imagenet(data_dir, shortlist):
 	# build imagenet tfrecords
 
-	train_data_dir = './../data/ImageNet/raw-data/train'
-	test_data_dir = './../data/ImageNet/raw-data/validation'
+	train_data_dir = FILE_PATH + "/imagenet10/train"
+	test_data_dir =  FILE_PATH + "/imagenet10/val"
 
 	class_id_to_name = {}
 	class_name_to_id = {}	
 
-	if data_dir == 'imagenet100':
+	if data_dir == 'imagenet100' or data_dir == 'imagenet10':
 		train_data_dir_files = [i for i in os.listdir(train_data_dir) if i in shortlist]
 		test_data_dir_files = [i for i in os.listdir(test_data_dir) if i in shortlist]
 	elif data_dir == 'imagenet':
@@ -101,6 +106,8 @@ def _build_imagenet(data_dir, shortlist):
 		assert(num_classes == 100)
 	elif data_dir == 'imagenet':
 		assert(num_classes == 1000)
+	elif data_dir == 'imagenet10':
+		assert(num_classes == 10)
 	else:
 		raise ValueError
 
@@ -118,7 +125,7 @@ def _load_images_gen(data_dir, class_name_to_id, data_dir_tag, shortlist, size):
 
 	if data_dir_tag == 'imagenet':
 		assert(shortlist is None)
-	elif data_dir_tag == 'imagenet100':
+	elif data_dir_tag == 'imagenet100' or data_dir_tag == 'imagenet10':
 		assert(shortlist is not None)
 	else:
 		raise ValueError
@@ -126,7 +133,7 @@ def _load_images_gen(data_dir, class_name_to_id, data_dir_tag, shortlist, size):
 	class_and_image_names = []
 
 	for class_name in os.listdir(data_dir):
-		if data_dir_tag == 'imagenet100':
+		if data_dir_tag == 'imagenet100' or data_dir_tag == 'imagenet10':
 			if class_name not in shortlist:
 				continue
 		for image in os.listdir(os.path.join(data_dir, class_name)):
@@ -144,41 +151,41 @@ def _load_images_gen(data_dir, class_name_to_id, data_dir_tag, shortlist, size):
 		image_label = class_name_to_id[class_name]
 
 		#resize to 320, 320
-		image_data = _resize_image(image_data, size)                 
+		image_data = _resize_image(image_data, size)		     
 
 		yield image_data, image_label
 
 def _bytes_feature(value):
 	# parse bytes data from tfrecords
-    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+	return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 def _bytes_feature_jpeg(value):
 	# parse jpeg data from tfrecords
-    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.encode_jpeg(value).numpy()]))
+	return tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.encode_jpeg(value).numpy()]))
 
 def _parse_function(proto, aux_labels):
 	# parse data from tfrecords
-    keys_to_features = {'image': tf.io.FixedLenFeature([], tf.string),
-                       'label': tf.io.FixedLenFeature([], tf.string)}
-                       #'label_aux': tf.io.FixedLenFeature([], tf.string)
+	keys_to_features = {'image': tf.io.FixedLenFeature([], tf.string),
+			    'label': tf.io.FixedLenFeature([], tf.string)}
+	#'label_aux': tf.io.FixedLenFeature([], tf.string)
+	
+	parsed_features = tf.io.parse_single_example(proto, keys_to_features)
     
-    parsed_features = tf.io.parse_single_example(proto, keys_to_features)
+	parsed_features['image'] = tf.io.decode_jpeg(parsed_features['image'])	  
+	parsed_features['label'] = tf.io.decode_raw(parsed_features['label'], tf.float32)
+	#parsed_features['label_aux'] = tf.io.decode_raw(parsed_features['label_aux'], tf.float32)
     
-    parsed_features['image'] = tf.io.decode_jpeg(parsed_features['image'])    
-    parsed_features['label'] = tf.io.decode_raw(parsed_features['label'], tf.float32)
-    #parsed_features['label_aux'] = tf.io.decode_raw(parsed_features['label_aux'], tf.float32)
-    
-    if not aux_labels:
-    	return parsed_features['image'], parsed_features['label']
-    else:    
-    	return parsed_features['image'], (parsed_features['label'], parsed_features['label'], parsed_features['label'], parsed_features['label'], parsed_features['label'])
+	if not aux_labels:
+		return parsed_features['image'], parsed_features['label']
+	else:	 
+		return parsed_features['image'], (parsed_features['label'], parsed_features['label'], parsed_features['label'], parsed_features['label'], parsed_features['label'])
 
 def _rebuild_image(image, label):
 	# rebuild image read from a tfrecords
-    image = tf.reshape(image, [320, 320, 3])
-    image = tf.cast(image, dtype=tf.float32)
-    image = image/255.
-    return image, label
+	image = tf.reshape(image, [320, 320, 3])
+	image = tf.cast(image, dtype=tf.float32)
+	image = image/255.
+	return image, label
 
 def _write_records(data_gen, files_per_shard, data_dir, name):
 	# write tfrecords
@@ -187,6 +194,8 @@ def _write_records(data_gen, files_per_shard, data_dir, name):
 		num_classes=100
 	elif data_dir == 'imagenet':
 		num_classes=1000
+	elif data_dir == 'imagenet10':
+		num_classes=10
 	else:
 		raise ValueError
 
@@ -205,7 +214,6 @@ def _write_records(data_gen, files_per_shard, data_dir, name):
 
 			_write_records_helper(container_x, container_y, data_dir, name, current_shard_id, num_classes)
 
-			
 			container_x = []
 			container_y = []
 			x_count += files_per_shard
@@ -236,7 +244,7 @@ def _write_records_helper(container_x, container_y, data_dir, name, current_shar
 	shard_filename = '{}-{}.tfrecords'.format(name, current_shard_id)
 	current_shard_id += 1
 
-	writer = tf.io.TFRecordWriter('/om5/user/kappa666/maya/{}/{}'.format(data_dir, shard_filename))
+	writer = tf.io.TFRecordWriter('{}/{}/{}'.format(FILE_PATH, data_dir, shard_filename))
 
 	for image, label in zip(container_x, container_y):
 		label_aux = np.array([label, label, label, label, label])
@@ -245,7 +253,7 @@ def _write_records_helper(container_x, container_y, data_dir, name, current_shar
 
 	writer.close()
 
-def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
+def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False, aux_labels=False, batch_size=256):
 	# 10 classes chosen from imagenet
 	# Snake: n01742172 boa_constrictor
 	# Dog: n02099712, Labrador_retriever 
@@ -258,61 +266,53 @@ def load_imagenet10(data_dir='imagenet10', only_test=False, only_bbox=False):
 	# Crab: n01981276 king_crab
 	# Insect: n02206856 bee
 
-
 	bbox_tag = '' if not only_bbox else '_bbox'
-	x_train_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-x_train.pickle'.format(data_dir, bbox_tag)
-	y_train_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-y_train.pickle'.format(data_dir, bbox_tag)
-	x_test_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-x_test.pickle'.format(data_dir, bbox_tag)
-	y_test_cache_file = '/om5/user/kappa666/maya/cache_store/{}{}-y_test.pickle'.format(data_dir, bbox_tag)
+	train_cache_pattern = '{}/{}/{}-train-*'.format(FILE_PATH, data_dir, bbox_tag)
+	test_cache_pattern = '{}/{}/{}-test-*'.format(FILE_PATH, data_dir, bbox_tag)
 
-	x_train = None
-	y_train = None
-	x_test = None
-	y_test = None
+	#if cache does not exist, build
+	if not (glob.glob(train_cache_pattern) and glob.glob(test_cache_pattern)):
+		#load raw images (resized)
+		train_data_gen, test_data_gen = _build_imagenet10(data_dir, size=320, only_test=only_test, only_bbox=only_bbox)
+
+		_write_records(train_data_gen, 1024, data_dir, bbox_tag + '-train')
+		_write_records(test_data_gen, 1024, data_dir, bbox_tag + '-test')
+
+	#load cache as tf dataset
+	train_tfrecords = tf.data.TFRecordDataset.list_files(train_cache_pattern, shuffle=True)
+	test_tfrecords = tf.data.TFRecordDataset.list_files(test_cache_pattern, shuffle=False)
+
+	train_dataset = tf.data.TFRecordDataset(train_tfrecords, num_parallel_reads=4)
+	test_dataset = tf.data.TFRecordDataset(test_tfrecords, num_parallel_reads=4)
+
+	_parse_function_filled = partial(_parse_function, aux_labels=aux_labels)
+	train_dataset = train_dataset.map(map_func=_parse_function_filled, num_parallel_calls=4)
+	test_dataset = test_dataset.map(map_func=_parse_function_filled, num_parallel_calls=4)
+
+	train_dataset = train_dataset.map(map_func=_rebuild_image, num_parallel_calls=4)
+	test_dataset = test_dataset.map(map_func=_rebuild_image, num_parallel_calls=4)
+
+	train_dataset = train_dataset.shuffle(buffer_size=1000, reshuffle_each_iteration=True)
+	train_dataset = train_dataset.batch(batch_size=batch_size, drop_remainder=False)
+	train_dataset = train_dataset.prefetch(3)
+
+	test_dataset = test_dataset.batch(batch_size=batch_size, drop_remainder=False)
 
 	if not only_test:
-		files = [x_train_cache_file, y_train_cache_file, x_test_cache_file, y_test_cache_file]
+		train_dataset = train_dataset.repeat()
+		test_dataset = test_dataset.repeat()
+
+	if only_test:
+		return None, test_dataset
 	else:
-		files = [x_test_cache_file, y_test_cache_file]
+		return train_dataset, test_dataset
 
-	#if cache exists, load from cache
-	if all([os.path.exists(file) for file in files]):
-		if not only_test:
-			x_train = pickle.load(open(x_train_cache_file, 'rb'))
-			y_train = pickle.load(open(y_train_cache_file, 'rb'))
-
-		x_test = pickle.load(open(x_test_cache_file, 'rb'))
-		y_test = pickle.load(open(y_test_cache_file, 'rb'))
-
-	#build from raw images and save as cache
-	else:
-		
-		#load raw images (resized)
-		x_train, y_train, x_test, y_test = _build_imagenet10(data_dir, size=320, only_test=only_test, only_bbox=only_bbox)
-
-		#preprocess
-		if not only_test:
-			x_train = _preprocess_x(x_train)
-			y_train = _preprocess_y(y_train, 10)
-
-		x_test = _preprocess_x(x_test)
-		y_test = _preprocess_y(y_test, 10)
-
-		#save as cache
-		if not only_test:
-			pickle.dump(x_train, open(x_train_cache_file, 'wb'), protocol=4)
-			pickle.dump(y_train, open(y_train_cache_file, 'wb'), protocol=4)
-
-		pickle.dump(x_test, open(x_test_cache_file, 'wb'), protocol=4)
-		pickle.dump(y_test, open(y_test_cache_file, 'wb'), protocol=4)
-
-	return x_train, y_train, x_test, y_test	
 
 def _build_imagenet10(data_dir, size, only_test, only_bbox):
 	# builds and dumps imagenet10 to disk
 
-	train_data_dir = '/om5/user/kappa666/maya/{}/train'.format(data_dir)
-	test_data_dir = '/om5/user/kappa666/maya/{}/val'.format(data_dir)
+	train_data_dir = '{}/{}/train'.format(FILE_PATH, data_dir)
+	test_data_dir = '{}/{}/val'.format(FILE_PATH, data_dir)
 
 	class_id_to_name = {}
 	class_name_to_id = {}
@@ -329,90 +329,84 @@ def _build_imagenet10(data_dir, size, only_test, only_bbox):
 	assert(np.all([i in class_id_to_name.values() for i in np.unique(os.listdir(train_data_dir))]))
 	assert(np.all([i in class_id_to_name.values() for i in np.unique(os.listdir(test_data_dir))]))
 
-	x_test = None
-	y_test = None
-	x_train = None
-	y_train = None
-
 	if not only_test:
-		x_train, y_train = _load_images(train_data_dir, class_name_to_id, size, True)
-	x_test, y_test = _load_images(test_data_dir, class_name_to_id, size, False)
-	
-	return x_train, y_train, x_test, y_test
-	
+		train_data_gen = _load_images(train_data_dir, class_name_to_id, size, True)
+	test_data_gen = _load_images(test_data_dir, class_name_to_id, size, False)
+	return train_data_gen, test_data_gen
+
 def _load_images(data_dir, class_name_to_id, size, bbox):
 	# read and preprocess images from disk
+	class_and_image_names = []
 
-	x_data = [] #image
-	y_data = [] #label
-	
 	for class_name in os.listdir(data_dir):
-		for image in tqdm(os.listdir(os.path.join(data_dir, class_name))):
-			file_dir = os.path.join(data_dir, class_name, image)
+		for image in os.listdir(os.path.join(data_dir, class_name)):
+			class_and_image_names.append((class_name, image))
 
-			#the image raw data
-			image_data = tf.keras.preprocessing.image.load_img(file_dir, target_size=None, color_mode='rgb')
+	np.random.shuffle(class_and_image_names)
+
+	for class_name, image in tqdm(class_and_image_names):
+		file_dir = os.path.join(data_dir, class_name, image)
+
+		#the image raw data
+		image_data = tf.keras.preprocessing.image.load_img(file_dir, target_size=None, color_mode='rgb')
 			
-			if bbox:
-				#crop to bounding box if exists, else ignore image
-				coords = _bbox_coords(file_dir)
-				if coords is None:
-					#no bbox exists, skip
-					continue
-				else:
-					#bbox exists, crop image
-					xmin, xmax, ymin, ymax = coords
-					image_data = image_data.crop((xmin, ymin, xmax, ymax)) 
+		if bbox:
+			#crop to bounding box if exists, else ignore image
+			coords = _bbox_coords(file_dir)
+			if coords is None:
+				#no bbox exists, skip
+				continue
+			else:
+				#bbox exists, crop image
+				xmin, xmax, ymin, ymax = coords
+				image_data = image_data.crop((xmin, ymin, xmax, ymax)) 
 
-			#the image label per assignments generated above
-			image_label = class_name_to_id[class_name]
-
-			#resize to 320, 320
-			image_data = _resize_image(image_data, size)                 
-
-			x_data.append(image_data)
-			y_data.append(image_label)
-			
-	return np.array(x_data), np.array(y_data)
+		#the image label per assignments generated above
+		image_label = class_name_to_id[class_name]
+		
+		#resize to 320, 320
+		image_data = _resize_image(image_data, size)		     
+		
+		yield image_data, image_label
 
 def _bbox_coords(image_file_dir):
 	#returns bbox coords given image file if exists
     
-    #check if bbox exists
-    image_bbox_dir = image_file_dir.replace('train', 'bbox').replace('JPEG', 'xml')
-    
-    if not os.path.exists(image_bbox_dir):
-        #none indicates no bbox file
-        return None
-    
-    xmin = _parse_XML(image_bbox_dir, 'xmin')
-    xmax = _parse_XML(image_bbox_dir, 'xmax')
-    ymin = _parse_XML(image_bbox_dir, 'ymin')
-    ymax = _parse_XML(image_bbox_dir, 'ymax')
+	#check if bbox exists
+	image_bbox_dir = image_file_dir.replace('train', 'bbox').replace('JPEG', 'xml')
+	
+	if not os.path.exists(image_bbox_dir):
+		#none indicates no bbox file
+		return None
+		
+	xmin = _parse_XML(image_bbox_dir, 'xmin')
+	xmax = _parse_XML(image_bbox_dir, 'xmax')
+	ymin = _parse_XML(image_bbox_dir, 'ymin')
+	ymax = _parse_XML(image_bbox_dir, 'ymax')
 
-    return xmin, xmax, ymin, ymax
+	return xmin, xmax, ymin, ymax
 
 def _parse_XML(xml_name, tag):
 	#reads imagenet xml bbox for requested tag
-    lines = [l for l in open(xml_name, 'r') if tag in l]
+	lines = [l for l in open(xml_name, 'r') if tag in l]
     
-    #ensure only 1 bbox
-    assert(len(lines) >= 0)
-#    if len(lines) > 1:
-#	    print('SKIPPING a BBOX')
-    lines = lines[0]
+	#ensure only 1 bbox
+	assert(len(lines) >= 0)
+	#    if len(lines) > 1:
+	#	    print('SKIPPING a BBOX')
+	lines = lines[0]
 
-    #assert(len(lines) == 1), '{}: {} | {}'.format(xml_name, len(lines), lines)
-    #lines = lines[0]
-    
-    pattern = r"<{}>(.*?)</{}>".format(tag, tag)
-    re_res = re.findall(pattern, lines)
-    
-    #ensure only 1 bbox
-    assert(len(re_res) == 1), '{} @ {}: {} | {}'.format(xml_name, tag, len(re_res), re_res)
-    re_res = int(re_res[0])
-    
-    return re_res
+	#assert(len(lines) == 1), '{}: {} | {}'.format(xml_name, len(lines), lines)
+	#lines = lines[0]
+	
+	pattern = r"<{}>(.*?)</{}>".format(tag, tag)
+	re_res = re.findall(pattern, lines)
+	
+	#ensure only 1 bbox
+	assert(len(re_res) == 1), '{} @ {}: {} | {}'.format(xml_name, tag, len(re_res), re_res)
+	re_res = int(re_res[0])
+	
+	return re_res
 
 def _resize_image(image, size):
 	# if image is smaller than largest glimpse, rescale to be as large as largest glimpse
@@ -510,10 +504,10 @@ def load_cifar10(only_test=False):
 def load_cluttered_mnist(only_test=False):
 	#cluttered mnist
 
-	x_train = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/x_train.p', 'rb'))
-	x_test = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/x_test.p', 'rb'))
-	y_train = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/y_train.p', 'rb'))
-	y_test = pickle.load(open('/om5/user/kappa666/maya/cluttered_mnist/y_test.p', 'rb'))
+	x_train = pickle.load(open('{}/cluttered_mnist/x_train.p'.format(FILE_PATH), 'rb'))
+	x_test = pickle.load(open('{}/cluttered_mnist/x_test.p'.format(FILE_PATH), 'rb'))
+	y_train = pickle.load(open('{}/cluttered_mnist/y_train.p'.format(FILE_PATH), 'rb'))
+	y_test = pickle.load(open('{}/cluttered_mnist/y_test.p'.format(FILE_PATH), 'rb'))
 
 	x_test = _preprocess_x(x_test)
 	y_test = _preprocess_y(y_test, 10)
@@ -556,14 +550,14 @@ def load_nonrobust_cifar10(model, name, random_relabel=True, cache=True, stagger
 
 	random_tag = 'random_relabel' if random_relabel else 'nonrandom_relabel'
 	features_tag = 'multifeature_' if build_orthogonal_features else ''
-	x_train_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}xtrain_adv.pickle'.format(name, random_tag, features_tag)
-	y_train_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}ytrain_adv.pickle'.format(name, random_tag, features_tag)
-	x_test_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}xtest_adv.pickle'.format(name, random_tag, features_tag)
-	y_test_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_{}ytest_adv.pickle'.format(name, random_tag, features_tag)
+	x_train_cache = '{}/cache_store/nonrobust_features_{}_{}_{}xtrain_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	y_train_cache = '{}/cache_store/nonrobust_features_{}_{}_{}ytrain_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	x_test_cache = '{}/cache_store/nonrobust_features_{}_{}_{}xtest_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
+	y_test_cache = '{}/cache_store/nonrobust_features_{}_{}_{}ytest_adv.pickle'.format(FILE_PATH, name, random_tag, features_tag)
 
 	if build_orthogonal_features:
-		perturbations_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_perturbations_adv.pickle'.format(name, random_tag)
-		y_train_true_cache = '/om5/user/kappa666/maya/cache_store/nonrobust_features_{}_{}_ytrain_true_adv.pickle'.format(name, random_tag)
+		perturbations_cache = '{}/cache_store/nonrobust_features_{}_{}_perturbations_adv.pickle'.format(FILE_PATH, name, random_tag)
+		y_train_true_cache = '{}/cache_store/nonrobust_features_{}_{}_ytrain_true_adv.pickle'.format(FILE_PATH, name, random_tag)
 
 	if cache:
 		if os.path.exists(x_train_cache) and os.path.exists(y_train_cache) and os.path.exists(x_test_cache) and os.path.exists(y_test_cache):
@@ -590,7 +584,7 @@ def load_nonrobust_cifar10(model, name, random_relabel=True, cache=True, stagger
 		label_pool = np.arange(len(y_train)) % 10
 		y_train_adv = np.random.choice(label_pool, replace=False, size=len(y_train)).astype('int64')
 	else:
-		#original: x_i   y_i
+		#original: x_i	 y_i
 		#adv:	   x_adv mod10(y_i+1)
 		y_train_adv = np.mod(y_train + 1, 10).astype('int64')
 
