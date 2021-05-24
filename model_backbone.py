@@ -181,7 +181,8 @@ class GazeLayer(layers.Layer):
 		super(GazeLayer, self).__init__()
 		self.attn_network = soft_attention_model(input_shape, 2, dummy_attention=False,
 							 dummy_scaled_attention=False, num_outputs=num_gazes,
-							 full_resnet=True, initialize_fixations=True)
+							 use_full_resnet=True, initialize_fixations=(num_gazes == 5),
+							 regularization=0.01)
 
 	def call(self, inputs):
 		return tf.transpose(self.attn_network(inputs))
@@ -204,7 +205,7 @@ def multi_gaze(base_model_input_shape=(320,320,3), num_classes=10, return_logits
 		x = model_input
 
 	gaze = GazeLayer(base_model_input_shape, num_gazes)(x)
-	gaze = gaze * 160
+	gaze = gaze * 160.
 
 	resnet_model = resnet(base_model_input_shape=base_model_input_shape, augment=False, coarse_fixations=False)
 	resnet_model = tf.keras.models.Sequential(resnet_model.layers[:-1])
@@ -625,19 +626,29 @@ def attention_mnist(augment=False, return_logits=True, attention=False, dummy_at
 
 	return model
 
-def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention, num_outputs=1, full_resnet=False, initialize_fixations=False):
+def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_attention, num_outputs=1, use_resnet=True, use_full_resnet=False, initialize_fixations=False, regularization=0.0):
 	#build attention network
 	
 	assert(type(input_shape) == tuple)
 	if num_coords != 6 and num_coords != 4 and num_coords != 2:
 		raise NotImplementedError
 
-	if full_resnet:
-		resnet_model = resnet(base_model_input_shape=input_shape, augment=False, coarse_fixations=False)
-		attention_network = tf.keras.models.Sequential(resnet_model.layers[:-1])
+	if use_resnet:
+		if use_full_resnet:
+			resnet_model = resnet(base_model_input_shape=input_shape, augment=False, coarse_fixations=False)
+			attention_network = tf.keras.models.Sequential(resnet_model.layers[:-1])
+		else:
+			attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
 	else:
-		attention_network = ResNet_CIFAR(n=3, version=1, input_shape=input_shape, num_classes=-1, verbose=0, return_logits=False, return_latent=True, build_feedback=False, skip_downsamples=False)
-	
+		attn_in = layers.Input(shape=input_shape)
+		attn_x = tf.keras.layers.Conv2D(20, [5, 5], activation='relu')(attn_in)
+		attn_x = tf.keras.layers.MaxPool2D()(attn_x)
+		attn_x = tf.keras.layers.Conv2D(20, [5, 5], activation='relu')(attn_x)
+		attn_x = tf.keras.layers.MaxPool2D()(attn_x)
+		attn_x = tf.keras.layers.Flatten()(attn_x)
+		attn_out = tf.keras.layers.Dense(20, activation='relu')(attn_x)
+		attention_network = tf.keras.models.Model(inputs=attn_in, outputs=attn_out)
+
 	model_input = layers.Input(shape=input_shape)
 	x = attention_network(model_input)
 
@@ -649,18 +660,17 @@ def soft_attention_model(input_shape, num_coords, dummy_attention, dummy_scaled_
 	elif num_coords == 4:
 		bias_init = [1., 0., 1., 0.]
 	elif num_coords == 2:
-		bias_init = [0., 0.]    	
+		bias_init = [0., 0.]
 
 	bias_init = [val for _ in range(num_outputs) for val in bias_init]
 	
 	if initialize_fixations:
 		bias_init = [0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.0, 0.0]
 
-	model_output = layers.Dense(num_coords * num_outputs, activation='tanh', kernel_initializer=tf.zeros_initializer(), bias_initializer=tf.constant_initializer(bias_init))(x)
+	model_output = layers.Dense(num_coords * num_outputs, activation='tanh', kernel_initializer=tf.zeros_initializer(), bias_initializer=tf.constant_initializer(bias_init), activity_regularizer=tf.keras.regularizers.l2(regularization))(x)
 
 	attn_model = tf.keras.models.Model(inputs=model_input, outputs=model_output)
 	if dummy_attention or dummy_scaled_attention:
 		attn_model.trainable = False
-
 	return attn_model
 
